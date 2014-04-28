@@ -4,10 +4,23 @@ Barch - LVM Backups manager
 ## Description ##
 An open source lvm snapshot and backup utility for linux based systems. Barch conducts automatic and predefined filesystem recognition. Supports full/incremental or hourly,daily,weekly backup formats. Based on dd, rsync, rsnapshot and duplicity.
 
+Key features:
+ * Incremental backups
+ * Parallel execution
+ * DRBD clusters compatible
+ * syslog logging
+
+### Introduction - How it works? ###
+Barch conducts LVM incremental backups by discovering entire hierarchy of each logical volume such as partitions, filesystems etc.  
+
+Before backup starts, Barch creates a snapshot of the target LV and mounts it to a temporary mount point. This allows the backup tool to sync changes (increments) between the last backup and the current state.  
+
+Barch is written in Perl and depends on duplicity, rsnapshot, rsync and kpartx. Please make sure this tools installed.
+
 For more reference regarding duplicity and rsnapshot, check: http://www.rsnapshot.org/ http://duplicity.nongnu.org/
 
 ## Requirements ##
-Required packages:   
+Required Packages:   
 ```
 perl lvm2 rsnapshot rsync kpartx tree python software-properties-common python-software-properties python-paramiko python-gobject-2 ncftp
 ```
@@ -27,21 +40,7 @@ git clone git@github.com:sysboss/Barch.git
 Follow the installer instructions.  
 
 ## Usage and maintenance ##
-After configuration complete, main config file syntax can be verified with:  
-> barch --syntax  
-
-However, it's highly recommanded to create a test LV volume to verify correct execution
-and prevent data corruptions or any other damage.  
-
-That could be done by running with --only option, to initiate single specified volume backup, as shown:  
-> barch --verbose -i hourly -o testLVname  
-
-Verbose mode will help you see the full backup flow. In case of any failure or warning, see problems resolution section below.
+Check wiki for usage and maintenance examples https://github.com/sysboss/Barch/wiki
 
 ## Documentation ##
-### Introduction - How it works? ###
-Barch conducts LVM incremental backups by discovering entire hierarchy of each logical volume such as partitions, filesystems etc.  
-
-Before backup, Barch creates a snapshot of the target LV and mount it to a temporary mount point. This method allows the backup tool to sync changes (increments) between the last backup and the current state.  
-
-Barch is written in Perl and depends on duplicity, rsnapshot, rsync and kpartx. Please make sure this tools installed.
+Check wiki for full documentation https://github.com/sysboss/Barch/wiki
