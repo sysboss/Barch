@@ -22,7 +22,7 @@ use Time::HiRes qw( gettimeofday );
 use File::Lockfile;
 use Net::OpenSSH;
 
-my $version = "6.0.4";
+my $version = "6.0.5";
 my $welcome = "Barch v$version - LVM backups manager";
 
 # tools
@@ -68,6 +68,7 @@ my $list_all;
 my $run_on  ;
 my $showhelp;
 my $showV   ;
+my $dry_run ;
 
 sub usage {
     print << "_END_USAGE";
@@ -84,14 +85,17 @@ Intervals:
   yearly                   Start yearly backup
 
 Options:
-  -v|--verbose             Log to stdout
-  -d|--debug               Debug mode (log rsnapshot progress)
   -c|--cleanup             Cleanup/Recovery mode
   -s|--skip                Skip LV(s)
   -o|--only                Backup only single specified volume
   -l|--list                List all backups
   -h|--help                Help (this info)
   --syntax                 Check config file syntax
+
+Debug Options:
+  -v|--verbose             Log to stdout
+  -d|--debug               Debug mode (log rsnapshot progress)
+  --discover               Discover only mode (dry run)
 
 Examples:
  $0 -i hourly --skip root,varlog
@@ -113,6 +117,7 @@ GetOptions(
     'l|list'       => \$list_all,
     'o|only=s'     => \$run_on,
     'syntax'       => \$chconfig,
+    'discover'     => \$dry_run,
 ) || usage( "bad option" );
 
 ####################
@@ -231,14 +236,14 @@ my $max_forks   = $conf->{advanced}->{max_forks}|| '2' ;
 
 # Duplicity
 my $full_backup = $conf->{duplicity}->{full}              || '1W';
-my $reconnect   = $conf->{duplicity}->{retries}           || '6';
+my $reconnect   = $conf->{duplicity}->{retries}           || '6' ;
 my $keep_last   = $conf->{duplicity}->{remove_older_than} || '2W';
 my $encrypt_key = $conf->{duplicity}->{encrypt_key};
 my $encrypt_pass= $conf->{duplicity}->{encrypt_pass};
 my $rem_snapdir = $conf->{duplicity}->{remote_snap_dir};
-my $volsize     = $conf->{duplicity}->{volsize}           || '25';
+my $volsize     = $conf->{duplicity}->{volsize}           || '25'  ;
 my $src_mismatch= $conf->{duplicity}->{source_mismatch}   || 'deny';
-my $notif_less  = $conf->{duplicity}->{not_if_less_than}  || 43200;
+my $notif_less  = $conf->{duplicity}->{not_if_less_than}  || 43200 ;
 my $StrictHostKey=$conf->{duplicity}->{StrictHostKey};
 
 # dd
@@ -272,7 +277,6 @@ my $log_std     = '';
 
 if( $debug ){
     $silent     = '';
-    #$log_std    = " | $tee -a $logpath/$logfile";
 }
 
 ####################
@@ -340,9 +344,6 @@ sub logger {
 ####################
 # Special params   #
 ####################
-# reverse operations stack
-my @reverse  = ();
-
 # just cleanup
 if ( $cleanup ){
     cleanup();
@@ -447,17 +448,6 @@ if ( !$interval ){
 # cleanup procedure
 sub cleanup {
     my $running = shift;
-
-    # exec reverse cleanup
-    foreach my $action (@reverse){
-        if( system($action) ne 0 ){
-            logger("[FATAL] cleanup action failed: $action");
-        }else{
-            logger("[DEBUG] cleanup: $action") if $debug;
-        }
-        sleep 0.4;
-    }
-
 
     # umount all
     `$umount -r $mount_dir/* $silent`;
@@ -646,6 +636,8 @@ sub report {
     my $status    = $barch_codes{ $hash{'code'} } || 'Unknown error';
     my $date      = localtime(time);
     my @timestamp = [gettimeofday];
+
+    return if $dry_run;
 
     # update existing
     if( $report->{$section} ){
@@ -904,10 +896,15 @@ sub discover {
             `$mount -t $cur_fs $mount_opts $blkdev $path`;
 
             if( $? ne 0 ){
-                exit_fatal("Can't mount $blkdev on $path",$lvname);
+                logger("[ERR] can't mount $blkdev on $path",$lvname,'err');
+
+                $hash{'status'} = "Failed to mount $blkdev on $path";
+                $hash{'code'}   = 2;
+
+                return %hash;
             }else{
                 logger("[DEBUG] mounting $blkdev on $path (mount opts: $mount_opts)",$lvname,'debug') if $debug;
-                push(@reverse, "$umount $path");
+                push($hash{cleanup}, "$umount $path");
             }
 
             $hash{'status'} = "Success";
@@ -963,11 +960,11 @@ sub discover {
 
                     return %hash;
                 }else{
-                    push(@reverse, "$umount $path");
+                    push($hash{cleanup}, "$umount $path");
 
                     # post mount script
                     if( $post_m ){
-                        push(@reverse, "$post_m") if( $post_m ne 'none' );
+                        push($hash{cleanup}, "$post_m") if( $post_m ne 'none' );
                     }
                 }
 
@@ -1036,16 +1033,16 @@ sub discover {
                 foreach my $part (@partition){
                     logger("[INFO] - partition found: $part",$lvname);
 
-                    # create temporary mount point
                     $data{'path'}   = "$hash{'path'}/$part";
                     $data{'blkdev'} = "/dev/mapper/$part";
+
+                    # create temporary mount point
                     `$mkdir -p $data{'path'}`;
 
                     # rediscover structure
                     %data = discover(%data);
 
                     if( $data{'code'} ne 0 && $data{'code'} ne 4 && $data{'code'} ne 6 ){
-                    #if( $data{'code'} ne 0 ){
                         $hash{'status'} = "One or more partition recognition failed";
                         $hash{'code'}   = 2;
 
@@ -1058,7 +1055,7 @@ sub discover {
             }
 
             # cleanup
-            push  (@reverse, "$kpartx -s -d $blkdev");
+            push ($hash{cleanup}, "$kpartx -s -d $blkdev");
 
             return %hash;
         }
@@ -1098,9 +1095,10 @@ sub discover {
                     foreach my $lv (@innerLV){
                         my( $vgname, $lvname, $lvsize, $lvunit, $lvsnap, $uid ) = parse_lvs($lv);
 
-                        # create temporary mount point
                         $data{'path'}   = "$hash{'path'}/$vgname/$lvname";
                         $data{'blkdev'} = "/dev/$vgname/$lvname";
+
+                        # create temporary mount point
                         `$mkdir -p $data{'path'}`;
 
                         %data = discover(%data);
@@ -1114,7 +1112,7 @@ sub discover {
                 }
 
                 foreach my $inVG (@VG){
-                    push(@reverse,"vgchange -an $inVG $silent");
+                    push($hash{cleanup},"vgchange -an $inVG $silent");
                 }
 
                 return %hash;
@@ -1194,20 +1192,20 @@ $pm->run_on_finish( sub {
     }
 
     # cleanup
-    cleanup( 'running' );
+    #cleanup( 'running' );
 
     logger("[INFO] Complete with '$status' in $elapsed sec.",$hash->{'lvname'});
     logger("[DEBUG] ** $ident just finished (pid $pid), exit code: $exit_code") if $debug;
 });
 
 # SSH connect
-my $ssh = Net::OpenSSH->new(
+my $openssh = Net::OpenSSH->new(
     $ssh_server, user => $ssh_user,
     master_opts => [ -o => "StrictHostKeyChecking=no" ]
 );
 
-$ssh->error and
-    die "Couldn't establish SSH connection to backup server: ". $ssh->error;
+$openssh->error and
+    die "Couldn't establish SSH connection to backup server: ". $openssh->error;
 
 # create target directories
 my $dirs = '';
@@ -1220,7 +1218,7 @@ foreach my $lv (@lvscan){
 
 logger("[DEBUG] Creating remote dirs: ssh $ssh_user\@$ssh_server '$dirs'",'Main') if $debug;
 
-$ssh->cmd($dirs)
+$openssh->system($dirs)
     or exit_fatal("Can't create remote directories on $ssh_server over SSH",'Main');
 
 # discover and backup process
@@ -1269,15 +1267,16 @@ foreach my $lv (@lvscan){
         status     => $barch_codes{'5'},
         code       => 5,
         elapsed    => 0,
+        cleanup    => []
     );
 
     # lock
     my $lockfile = File::Lockfile->new(
         "$lvname.pid",
         "$lvlock_dir",
-    );
+    ) if !$dry_run;
 
-    if( -e "$lvlock_dir/$lvname.pid" ){
+    if( -e "$lvlock_dir/$lvname.pid" && !$dry_run ){
         logger("[INFO] $lvname is locked by other instance",$lvname);
 
         $data{'code'}    = 3;
@@ -1290,8 +1289,10 @@ foreach my $lv (@lvscan){
         report(%data);
     }
 
-    exit_fatal("[FATAL] Can't create a lock file in $lvlock_dir",$lvname)
-        if( ! $lockfile->write );
+    if( !$dry_run ){
+        exit_fatal("[FATAL] Can't create a lock file in $lvlock_dir",$lvname)
+            if(!$lockfile->write);
+    }
 
     # create snapshot
     if( `$lvm lvcreate -L${snap_size} -n $lvsnap -s /dev/$vgname/$lvname` ){
@@ -1316,24 +1317,28 @@ foreach my $lv (@lvscan){
     %data = discover(%data);
 
     # backup mounted fs
-    if( $data{'code'} eq 0 ){
-        %data = backup(%data);
-
-        if( $data{'code'} ne 0 ){
-            logger("[ERR] backup failed: $data{'status'}",$lvname,'err');
-        }else{
-            logger("[INFO] backup succeeded",$lvname);
-        }
-    }elsif( $data{'code'} eq 6 || $data{'code'} eq 4 ){
-        logger("[EXC] Backup skipped",$lvname,'warning');
+    if( $dry_run ){
+        logger("[EXC] backup skiped. dry-run");
     }else{
-        logger("[ERR] auto discover failed: $data{'status'}",$lvname,'err');
+        if( $data{'code'} eq 0 ){
+            %data = backup(%data);
+
+            if( $data{'code'} ne 0 ){
+                logger("[ERR] backup failed: $data{'status'}",$lvname,'err');
+            }else{
+                logger("[INFO] backup succeeded",$lvname);
+            }
+        }elsif( $data{'code'} eq 6 || $data{'code'} eq 4 ){
+            logger("[EXC] Backup skipped",$lvname,'warning');
+        }else{
+            logger("[ERR] auto discover failed: $data{'status'}",$lvname,'err');
+        }
     }
 
     $data{'elapsed'} = (time - $start_time);
 
     # exec reverse cleanup
-    foreach my $action (@reverse){
+    foreach my $action ( @{$data{cleanup}} ){
         if( system($action) ne 0 ){
             logger("[FATAL] cleanup action failed: $action",$lvname,'err');
             sleep 1;
