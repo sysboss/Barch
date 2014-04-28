@@ -19,9 +19,11 @@ Getopt::Long Config::Tiny Log::Dispatchouli POSIX LWP::Simple strictures Time::H
 
 ## Installation ##
 Clone files to some temporary folder on target host then run:  
-> git clone git@github.com:sysboss/Barch.git
-> ./INSTALL
-  
+```
+git clone git@github.com:sysboss/Barch.git
+./INSTALL
+```
+
 Follow the installer instructions.  
 
 ## Usage and maintenance ##
