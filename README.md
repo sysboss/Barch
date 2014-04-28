@@ -4,7 +4,18 @@ Barch - LVM Backups manager
 ## Description ##
 An open source lvm snapshot and backup utility for linux based systems. Barch conducts automatic and predefined filesystem recognition. Supports full/incremental or hourly,daily,weekly backup formats. Based on dd, rsync, rsnapshot and duplicity.
 
-For more reference regarding rsnapshot, check http://www.rsnapshot.org/ Duplicity: http://duplicity.nongnu.org/
+For more reference regarding duplicity and rsnapshot, check: http://www.rsnapshot.org/ http://duplicity.nongnu.org/
+
+## Requirements ##
+Required packages:   
+```
+perl lvm2 rsnapshot rsync kpartx tree python software-properties-common python-software-properties python-paramiko python-gobject-2 ncftp
+```
+
+Required Perl-Moules:
+```
+Getopt::Long Config::Tiny Log::Dispatchouli POSIX LWP::Simple strictures Time::HiRes File::Lockfile Parallel::ForkManager
+```
 
 ## Installation ##
 Clone files to some temporary folder on target host then run:  
