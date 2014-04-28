@@ -1,0 +1,178 @@
+#!/usr/bin/perl
+#
+# Barchd - deamonize tool
+# Copyright (c) 2013-2014 Alexey Baikov <sysboss@mail.ru>
+#
+
+use strict;
+use warnings;
+
+use Getopt::Long;
+use LWP::Simple;
+use POSIX qw(setsid);
+use Config::Tiny;
+
+my $version = "2.1.0";
+my $welcome = "Barchd v$version - Deamonize tool";
+
+# flush the buffer
+$| = 1;
+
+# check if deamon is running
+my $lock = '/var/lock/barchd.lock';
+
+if( -e $lock ){
+    my $instance = `ps -ef | grep -v grep | grep barchd | wc -l`;
+
+    if( $instance > 1 ){
+        print "Barchd deamon is already running. Abort.";
+        exit 2;
+    }
+}
+
+sub usage {
+    print "@_\n" if @_;
+    print "$welcome\n\n";
+    print << "_END_USAGE";
+usage: $0 [ options ] FROM
+
+Options:
+  -f|--no-deamon           Run in foreground
+  -v|--verbose             Log to stdout
+  -h|--help                Help (this info)
+
+_END_USAGE
+
+    exit 0;
+}
+
+# create lock file
+`touch $lock`;
+
+# options
+my $nodeamon;
+my $verbose;
+my $help;
+
+GetOptions(
+    'f|no-deamon' => \$nodeamon,
+    'v|verbose'   => \$verbose,
+    'h|help'      => \$help,
+) || usage( "bad option" );
+
+# show help
+if( $help ){ usage() }
+
+# daemonize the program
+&daemonize('/etc/barch') if !$nodeamon;
+
+# signals handler
+$SIG{TERM} = 'sigHandler';
+$SIG{INT}  = 'sigHandler';
+
+# config
+my $pwd = '/etc/barch';
+my $sch = '/var/cache/barch/db.queue';
+
+# definitions
+chomp( my $date  = `date`        );
+chomp( my $barch = `which barch` );
+
+open ( my $fh,">$pwd/deamon.log" )
+    or die "Can't write to log file\n";
+
+print $fh "$date Deamon started ($version)\n";
+
+if( !-e "$pwd/barch.conf" ){
+    print $fh "$pwd/barch.conf file not found\n";
+    die "$pwd/barch.conf file not found";
+}
+
+while ( 1 ){
+    my $conf  = Config::Tiny->read( "$pwd/barch.conf" );
+    my $delay = $conf->{duplicity}->{not_if_less_than}  || 43200;
+
+    if( ! ($delay =~ m/^\d+$/) ){
+        print "ERROR not_if_less_than should be a number\n";
+        exit 2;
+    }
+
+    # run hourly backups
+    chomp ( $date = `date` );
+    print $fh "$date Start hourly\n";
+    system( `$barch -i hourly` );
+
+    # run daily backups
+    if( `cat $sch | grep daily` ){
+        chomp ( $date = `date` );
+        print $fh "$date Start daily\n";
+        system( `$barch -i daily` );
+        system( `cat $sch | grep -v daily > /tmp/temp` );
+        system( `mv /tmp/temp $sch` );
+    }
+
+    # run weekly backups
+    if( `cat $sch | grep weekly` ){
+        chomp ( $date = `date` );
+        print $fh "$date Start weekly\n";
+        system( `$barch -i weekly` );
+        system( `cat $sch | grep -v weekly > /tmp/temp` );
+        system( `mv /tmp/temp $sch` );
+    }
+
+    # run monthly backups
+    if( `cat $sch | grep monthly` ){
+        chomp ( $date = `date` );
+        print $fh "$date Start monthly\n";
+        system( `$barch -i monthly` );
+        system( `cat $sch | grep -v monthly > /tmp/temp` );
+        system( `mv /tmp/temp $sch` );
+    }
+
+    # run yearly backups
+    if( `cat $sch | grep yearly` ){
+        chomp ( $date = `date` );
+        print $fh "$date Start yearly\n";
+        system( `$barch -i yearly` );
+        system( `cat $sch | grep -v yearly > /tmp/temp` );
+        system( `mv /tmp/temp $sch` );
+    }
+
+    # rotate log file
+    chomp ( $date = `date` );
+    system( "cat $pwd/deamon.log | tail -600 > /tmp/deamon.log.tmp" );
+    system( "mv /tmp/deamon.log.tmp $pwd/deamon.log" );
+
+    sleep $delay;
+}
+
+print $fh "Complete\n";
+close $fh;
+
+sub sigHandler {
+    # remove lock
+    unlink $lock;
+
+    print "Barchd terminated (SIG: @_)";
+    exit 3;
+}
+
+sub daemonize {
+    my $pwd = shift;
+
+    chdir $pwd or die "Can't chdir to $pwd: $!";
+    open STDIN, '/dev/null' or die "Can't read /dev/null: $!";
+    open STDOUT, '>>/dev/null' or die "Can't write to /dev/null: $!";
+    open STDERR, '>>/dev/null' or die "Can't write to /dev/null: $!";
+
+    defined( my $pid = fork ) or die "Can't fork: $!";
+    exit if $pid;
+
+    setsid or die "Can't start a new session: $!";
+    umask 0;
+}
+
+unlink $lock;
+exit 0;
+
+# vim:sw=4:ts=4:et

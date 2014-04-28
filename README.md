@@ -9,6 +9,7 @@ Key features:
  * Parallel execution
  * DRBD clusters compatible
  * syslog logging
+ * Built-in backups monitoring tool
 
 ### Introduction - How it works? ###
 Barch conducts LVM incremental backups by discovering entire hierarchy of each logical volume such as partitions, filesystems etc.  

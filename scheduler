@@ -1,0 +1,20 @@
+#!/bin/bash
+
+PWD="/var/cache/barch"
+
+if [ ! $@ ]; then
+    echo "usage ./scheduler [interval]"
+    echo "Intervals: daily, monthly, yearly"
+    exit 2
+fi
+
+cat $PWD/db.queue | grep $@ 1>/dev/null 2>/dev/null
+
+if [ $? -ne 0 ]; then
+    echo `date` $@ >> $PWD/db.queue
+    echo "Done"
+    exit 0
+else
+    echo "already scheduled"
+    exit 1
+fi

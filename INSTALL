@@ -1,0 +1,111 @@
+#!/bin/bash
+
+# version
+VERSION=6
+
+PACKAGES="perl lvm2 rsnapshot rsync kpartx tree python software-properties-common python-software-properties python-paramiko python-gobject-2 ncftp"
+PERL_MODULES="Getopt::Long Config::Tiny Log::Dispatchouli POSIX LWP::Simple strictures Time::HiRes File::Lockfile Parallel::ForkManager"
+TOOLS="perl lvm rsnapshot rsync kpartx tree python ncftp"
+NEW_INSTALL=true
+
+echo "Welcome to Barch ${VERSION}.x Install tool"
+echo ""
+echo "Please make sure you have the following packages installed:"
+echo "  apt-get install / yum install "
+echo "  $PACKAGES"
+echo "For Ubuntu users, add the following repository:"
+echo "  apt-add-repository ppa:duplicity-team/ppa"
+echo ""
+echo "Press N or CTRL+C to stop or press 'Y' to continue..."
+read ANSWER
+
+if [[ $ANSWER =~ ^[Yy]$ ]]
+then
+
+    for i in $TOOLS; do
+        if ! which $i > /dev/null; then
+            echo "$i is required."
+            exit 2
+        fi
+    done
+
+    if which barch > /dev/null; then
+        NEW_INSTALL=false
+    fi
+
+    clear
+    echo "Barch - LVM Backups Manager"
+
+    if ! which cpanm > /dev/null; then
+        echo "├ cpanm not installed"
+        echo "│ installing..."
+        curl -L http://cpanmin.us | perl - --sudo App::cpanminus > /dev/null
+    else
+        echo "├ cpanm installed"
+    fi
+
+    echo "├ installing perl-modules"
+
+    for i in $PERL_MODULES; do
+        echo -n "│ * installing $i"
+        cpanm $i > /dev/null
+        echo " - done"
+    done
+
+    echo -n "├ creating directories..."
+
+    mkdir -p /etc/barch
+    mkdir -p /usr/local/backup
+    mkdir -p /var/cache/barch/conf.d
+    mkdir -p /var/cache/barch/mounts
+    mkdir -p /var/lock/barch
+
+    echo " done"
+    echo -n "├ copying files..."
+
+    cp -ax barch /etc/barch/
+    cp -ax barchd /etc/barch/
+    cp -ax scheduler /etc/barch/
+
+    echo " done"
+    echo -n "├ creating symbolic links..."
+
+    if [ ! -f /usr/local/bin/barch ]; then
+        ln -s /etc/barch/barch /usr/local/bin/barch
+    fi
+
+    if [ ! -f /usr/local/bin/barchd ]; then
+        ln -s /etc/barch/barchd /usr/local/bin/barchd
+    fi
+
+    touch /var/cache/barch/db.queue
+
+    echo " done"
+    echo -n "├ copying configuration..."
+
+    if [ ! -f /etc/barch/barch.conf ]; then
+        cp -ax barch.conf /etc/barch/
+    fi
+
+    if [ ! -f /etc/barch/custom.conf ]; then
+        cp -ax custom.conf /etc/barch/
+    fi
+
+    if [ ! -f /etc/barch/rsnapshot.conf ]; then
+        cp -ax rsnapshot.conf /etc/barch/
+    fi
+
+    echo " done"
+    echo "Installation complete"
+    echo ""
+    echo "TIP: after configuration, run barchd deamon"
+    echo "and schedule backups using cron jobs:"
+    echo '0 0 * * *       /etc/barch/scheduler daily > /dev/null'
+    echo '1 2 * * 0       /etc/barch/scheduler weekly > /dev/null'
+    echo '1 5 1 * *       /etc/barch/scheduler monthly > /dev/null'
+    echo '1 8 1 1 *       /etc/barch/scheduler yearly > /dev/null'
+else
+    echo ""
+    echo "Come back later"
+    exit 1
+fi
