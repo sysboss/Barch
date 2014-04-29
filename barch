@@ -1317,10 +1317,12 @@ foreach my $lv (@lvscan){
     }
 
     # create snapshot
-    if( `$lvm lvcreate -L${snap_size} -n $lvsnap -s /dev/$vgname/$lvname` ){
+    my $lvcreate = `$lvm lvcreate -L${snap_size} -n $lvsnap -s /dev/$vgname/$lvname 2>&1`;
+
+    if( $? eq 0 ){
         logger("[INFO] Creating snapshot of $lvname (size: ${lvsize}${lvunit})", $lvname);
     }else{
-        logger("[ERR] failed to create snapshot of $lvname (code: $?). Skip.",$lvname,'err');
+        logger("[ERR] failed to create snapshot of $lvname ($lvcreate, code: $?). Skip.",$lvname,'err');
 
         $data{'elapsed'} = (time - $start_time);
         $data{'code'}    = 2;
