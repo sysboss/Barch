@@ -22,7 +22,7 @@ use Time::HiRes qw( gettimeofday );
 use File::Lockfile;
 use Net::OpenSSH;
 
-my $version = "6.0.5";
+my $version = "6.0.51";
 my $welcome = "Barch v$version - LVM backups manager";
 
 # tools
@@ -510,15 +510,31 @@ sub is_custom {
     my $lvname = shift;
 
     if( $conf->{advanced}->{custom} && -e $conf->{advanced}->{custom} ){
-        my $custom = Config::Tiny->new();
-        $custom    = Config::Tiny->read( $conf->{advanced}->{custom} );
+        my $custom = Config::Tiny->read( $conf->{advanced}->{custom} );
 
         foreach my $section ( keys %{ $custom } ) {
             if( $section eq $lvname ){
                 return 0;
             }
         }
-    }else{ return 1 }
+    }else{
+        return 1;
+    }
+}
+# is backup disabled
+sub is_disabled {
+    my $lvname = shift;
+
+    if( $conf->{advanced}->{custom} && -e $conf->{advanced}->{custom} ){
+        my $custom = Config::Tiny->read( $conf->{advanced}->{custom} );
+
+        if( $custom->{$lvname}->{backup} ){
+            return 0 if $custom->{$lvname}->{backup} eq 'false';
+        }
+        return 1;
+    }else{
+        return 1;
+    }
 }
 # returns filesystem type
 sub fs_type {
@@ -1231,6 +1247,12 @@ foreach my $lv (@lvscan){
             logger("[EXC] $lvname is drbd device. State is not '$drbd_state'. skip.",$lvname);
             next;
         }
+    }
+
+    # skip if disabled
+    if( is_disabled($lvname) eq 0 ){
+        logger("[EXC] $lvname backup is disabled by custom.conf",$lvname);
+        next;
     }
 
     # check last backup time
