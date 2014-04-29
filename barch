@@ -920,7 +920,7 @@ sub discover {
                 return %hash;
             }else{
                 logger("[DEBUG] mounting $blkdev on $path (mount opts: $mount_opts)",$lvname,'debug') if $debug;
-                push($hash{cleanup}, "$umount $path");
+                push(@{ $hash{cleanup} }, "$umount $path");
             }
 
             $hash{'status'} = "Success";
@@ -976,11 +976,11 @@ sub discover {
 
                     return %hash;
                 }else{
-                    push($hash{cleanup}, "$umount $path");
+                    push(@{ $hash{cleanup} }, "$umount $path");
 
                     # post mount script
                     if( $post_m ){
-                        push($hash{cleanup}, "$post_m") if( $post_m ne 'none' );
+                        push(@{ $hash{cleanup} }, "$post_m") if( $post_m ne 'none' );
                     }
                 }
 
@@ -1071,7 +1071,7 @@ sub discover {
             }
 
             # cleanup
-            push ($hash{cleanup}, "$kpartx -s -d $blkdev");
+            push(@{ $hash{cleanup} }, "$kpartx -s -d $blkdev");
 
             return %hash;
         }
@@ -1128,7 +1128,7 @@ sub discover {
                 }
 
                 foreach my $inVG (@VG){
-                    push($hash{cleanup},"vgchange -an $inVG $silent");
+                    push(@{ $hash{cleanup} },"vgchange -an $inVG $silent");
                 }
 
                 return %hash;
