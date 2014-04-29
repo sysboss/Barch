@@ -22,7 +22,7 @@ use Time::HiRes qw( gettimeofday );
 use File::Lockfile;
 use Net::OpenSSH;
 
-my $version = "6.0.51";
+my $version = "6.0.52";
 my $welcome = "Barch v$version - LVM backups manager";
 
 # tools
@@ -1373,6 +1373,9 @@ foreach my $lv (@lvscan){
         }
         sleep 0.4;
     }
+
+    # remove snapshot
+   `$lvm lvremove -f /dev/$vgname/$lvname $silent`;
 
     $lockfile->remove if $lockfile;
     $pm->finish(0, \%data);
