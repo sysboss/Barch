@@ -109,7 +109,11 @@ then
     echo " done"
     echo ""
     echo "Installation complete"
-    echo ""
+
+    if [[ $NEW_INSTALL -eq 'true' ]]; then
+        echo "A newer version installed. Please verify that you old configuration file is up-to-date."
+    fi
+
     echo ""
     echo "TIP: after configuration, run barchd deamon"
     echo "and schedule backups using cron jobs:"
