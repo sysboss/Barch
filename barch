@@ -16,13 +16,12 @@ use warnings;
 use Sys::Syslog;
 use Getopt::Long;
 use Config::Tiny;
-use Log::Dispatchouli;
 use Parallel::ForkManager;
 use Time::HiRes qw( gettimeofday );
 use File::Lockfile;
 use Net::OpenSSH;
 
-my $version = "6.0.52";
+my $version = "6.0.53";
 my $welcome = "Barch v$version - LVM backups manager";
 
 # tools
@@ -69,6 +68,7 @@ my $run_on  ;
 my $showhelp;
 my $showV   ;
 my $dry_run ;
+my $mapper  ;
 
 sub usage {
     print << "_END_USAGE";
@@ -118,6 +118,7 @@ GetOptions(
     'o|only=s'     => \$run_on,
     'syntax'       => \$chconfig,
     'discover'     => \$dry_run,
+    'mapper'       => \$mapper,
 ) || usage( "bad option" );
 
 ####################
@@ -415,10 +416,14 @@ sub exit_fatal {
 ####################
 # Verification     #
 ####################
-# verify report file exist
-system ("touch $reportfile");
+# verify required files exist
+`touch $reportfile`;
+`echo > $work_dir/mapper` if $mapper;
+
+# verify directories exist
 mkdir $snap_dir if !-e $snap_dir;
 mkdir $lvlock_dir if !-e $lvlock_dir;
+
 
 # verify backup dir is mounted
 # mixed mode or rsnapshot mode only
@@ -645,7 +650,26 @@ sub drbd_state {
         if( $state eq $drbd_state || $drbd_state eq 'any' ){ return 0; }else{ return 2; }
     }
 }
+# writes mapper file
+sub mapper {
+    my (%hash)  = @_;
+    my $mapfile = "$work_dir/mapper";
+    my $section = $hash{'vgname'} . "." . $hash{'lvname'};
+    my $map     = Config::Tiny->read( $mapfile );
+    my $size    = scalar(@{ $hash{hierarchy} } );
 
+    if( $size eq '0' ){
+        $map->{$section}->{filesystem} = $hash{'fstype'};
+    }else{
+        foreach my $element ( @{ $hash{hierarchy} } ){
+            $map->{$section}->{'hierarchy'} = $element;
+        }
+    }
+
+    $map->write($mapfile)
+        or logger("[ERR] failed to write mapper file",'Main','err');
+}
+# writes report file
 sub report {
     my (%hash)    = @_;
     my $section   = $hash{'vgname'} . "." . $hash{'lvname'};
@@ -729,7 +753,7 @@ sub duplicity {
 
     logger("[DEBUG] Exec: $exc",$hash{'lvname'},'debug') if $debug;
 
-    my $output = `$nice -n $cpu_nice $ionice -c2 -n${io_nice} $exc 2>&1`;
+    my $output = `$nice -n $cpu_nice $ionice -c2 -n${io_nice} $exc`;
 
     logger("[$verbosity] duplicity: $output",$hash{'lvname'});
 
@@ -893,6 +917,10 @@ sub discover {
     if( $cur_fs =~ m/$fslist/ ){
         logger("[INFO] - $cur_fs identified on $blkdev",$lvname);
 
+        if( ${ $hash{hierarchy} }[-1] ){
+            ${ $hash{hierarchy} }[-1] .= " - $cur_fs";
+        }
+
         # skip filesystem types
         # defined by config
         if( $cur_fs =~ m/$skip_always/ ){
@@ -999,6 +1027,11 @@ sub discover {
         }
         # ntfs
         elsif( $cur_fs eq 'ntfs' || $cur_fs eq 'unknown' ){
+            # update hierarchy
+            if( ${ $hash{hierarchy} }[-1] ){
+                ${ $hash{hierarchy} }[-1] .= " - $cur_fs";
+            }
+
             # should be backed up with dd
             $hash{'force_dd'} = 'true';
 
@@ -1049,6 +1082,8 @@ sub discover {
                 foreach my $part (@partition){
                     logger("[INFO] - partition found: $part",$lvname);
 
+                    push(@{ $hash{hierarchy} }, "partition");
+
                     $data{'path'}   = "$hash{'path'}/$part";
                     $data{'blkdev'} = "/dev/mapper/$part";
 
@@ -1077,6 +1112,8 @@ sub discover {
         }
         # LVM2
         elsif( $cur_fs eq 'lvm2' ){
+            push(@{ $hash{hierarchy} }, "lvm structure");
+
             if( $backup_lvm eq 'true' ){
                 $hash{'status'} = "Success";
                 $hash{'code'}   = 0;
@@ -1090,6 +1127,8 @@ sub discover {
                 my $filter   = '';
 
                 foreach my $inVG (@VG){
+                    push(@{ $hash{hierarchy} }, "VG $inVG");
+
                     # activate volume group(s)
                     if( system("vgchange -ay $inVG $silent") ne 0 ){
                         $hash{'status'} = "vgchange failed to activate $inVG";
@@ -1110,6 +1149,8 @@ sub discover {
 
                     foreach my $lv (@innerLV){
                         my( $vgname, $lvname, $lvsize, $lvunit, $lvsnap, $uid ) = parse_lvs($lv);
+
+                        push(@{ $hash{hierarchy} }, "LV: $lv");
 
                         $data{'path'}   = "$hash{'path'}/$vgname/$lvname";
                         $data{'blkdev'} = "/dev/$vgname/$lvname";
@@ -1258,7 +1299,7 @@ foreach my $lv (@lvscan){
     # check last backup time
     my $report_time= $report->{"$vgname.$lvname"}->{'timestamp'};
 
-    if( $report_time ){
+    if( $report_time && !$dry_run ){
         logger("[DEBUG] Last backup: $report_time",$lvname,'debug') if $debug;
 
         my @timenow = [gettimeofday];
@@ -1289,7 +1330,8 @@ foreach my $lv (@lvscan){
         status     => $barch_codes{'5'},
         code       => 5,
         elapsed    => 0,
-        cleanup    => []
+        cleanup    => [],
+        hierarchy  => []
     );
 
     # lock
@@ -1339,6 +1381,9 @@ foreach my $lv (@lvscan){
 
     # auto structure discover
     %data = discover(%data);
+
+    # map structure
+    mapper(%data);
 
     # backup mounted fs
     if( $dry_run ){

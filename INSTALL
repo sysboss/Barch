@@ -3,20 +3,23 @@
 # version
 VERSION=6
 
-PACKAGES="perl lvm2 rsnapshot rsync kpartx tree python software-properties-common python-software-properties python-paramiko python-gobject-2 ncftp"
-PERL_MODULES="Getopt::Long Config::Tiny Log::Dispatchouli POSIX LWP::Simple strictures Time::HiRes File::Lockfile Parallel::ForkManager"
-TOOLS="perl lvm rsnapshot rsync kpartx tree python ncftp"
+PACKAGES="perl lvm2 rsnapshot rsync kpartx tree python software-properties-common python-software-properties python-paramiko python-gobject-2 ncftp make gcc"
+PERL_MODULES="Getopt::Long Config::Tiny POSIX LWP::Simple strictures Time::HiRes File::Lockfile Parallel::ForkManager"
+TOOLS="perl lvm rsnapshot rsync kpartx tree python ncftp duplicity make"
 NEW_INSTALL=true
+
+clear
 
 echo "Welcome to Barch ${VERSION}.x Install tool"
 echo ""
 echo "Please make sure you have the following packages installed:"
 echo "  apt-get install / yum install "
 echo "  $PACKAGES"
+echo ""
 echo "For Ubuntu users, add the following repository:"
 echo "  apt-add-repository ppa:duplicity-team/ppa"
 echo ""
-echo "Press N or CTRL+C to stop or press 'Y' to continue..."
+echo "Press 'N' or CTRL+C to stop or press 'Y' to continue..."
 read ANSWER
 
 if [[ $ANSWER =~ ^[Yy]$ ]]
@@ -49,7 +52,13 @@ then
     for i in $PERL_MODULES; do
         echo -n "│ * installing $i"
         cpanm $i > /dev/null
-        echo " - done"
+        if [ $? -ne 0 ]; then
+            echo " - failed"
+            echo "Failed to install $i module"
+            exit 2
+        else
+            echo " - done"
+        fi
     done
 
     echo -n "├ creating directories..."
@@ -95,8 +104,16 @@ then
         cp -ax rsnapshot.conf /etc/barch/
     fi
 
+    cp -ax version /etc/barch 
+
     echo " done"
+    echo ""
     echo "Installation complete"
+
+    if [[ $NEW_INSTALL -eq 'true' ]]; then
+        echo "A newer version installed. Please verify that you old configuration file is up-to-date."
+    fi
+
     echo ""
     echo "TIP: after configuration, run barchd deamon"
     echo "and schedule backups using cron jobs:"
