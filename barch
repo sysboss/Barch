@@ -16,7 +16,6 @@ use warnings;
 use Sys::Syslog;
 use Getopt::Long;
 use Config::Tiny;
-use Log::Dispatchouli;
 use Parallel::ForkManager;
 use Time::HiRes qw( gettimeofday );
 use File::Lockfile;
