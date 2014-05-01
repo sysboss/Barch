@@ -753,7 +753,7 @@ sub duplicity {
 
     logger("[DEBUG] Exec: $exc",$hash{'lvname'},'debug') if $debug;
 
-    my $output = `$nice -n $cpu_nice $ionice -c2 -n${io_nice} $exc`;
+    my $output = `$nice -n $cpu_nice $ionice -c2 -n${io_nice} $exc 2>&1`;
 
     logger("[$verbosity] duplicity: $output",$hash{'lvname'});
 
