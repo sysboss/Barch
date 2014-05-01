@@ -1383,7 +1383,7 @@ foreach my $lv (@lvscan){
     %data = discover(%data);
 
     # map structure
-    mapper(%data);
+    mapper(%data) if $mapper;
 
     # backup mounted fs
     if( $dry_run ){
