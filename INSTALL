@@ -110,7 +110,7 @@ then
     echo ""
     echo "Installation complete"
 
-    if [[ $NEW_INSTALL -eq 'true' ]]; then
+    if [[ $NEW_INSTALL -eq 'false' ]]; then
         echo "A newer version installed. Please verify that you old configuration file is up-to-date."
     fi
 
