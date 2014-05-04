@@ -21,7 +21,7 @@ use Time::HiRes qw( gettimeofday );
 use File::Lockfile;
 use Net::OpenSSH;
 
-my $version = "6.0.53";
+my $version = "6.0.54";
 my $welcome = "Barch v$version - LVM backups manager";
 
 # tools
@@ -50,6 +50,7 @@ chomp( my $ionice    = `which ionice`    ); if( !$ionice    ) { die "[ERR] No io
 chomp( my $ncftp     = `which ncftp`     ); if( !$ncftp     ) { die "[ERR] No ncftp found";     }
 chomp( my $gzip      = `which gzip`      ); if( !$gzip      ) { die "[ERR] No gzip found";      }
 chomp( my $gpg       = `which gpg`       ); if( !$gpg       ) { die "[ERR] No gpg found";       }
+chomp( my $parted    = `which parted`    ); if( !$parted    ) { die "[ERR] No parted found";    }
 chomp( my $tree      = `which tree`      );
 
 # signals handler
@@ -553,6 +554,12 @@ sub fs_type {
         logger("[INFO] $hash{'lvname'} has custom definitions",$hash{'lvname'});
         return 'custom';
     }else{
+        # ubuntu 14.04 bug workaround
+        # check if any partitions exist
+        if( system("$parted $dev print | grep primary") eq '0' ){
+            return 'partition';
+        }
+
         # search header
         chomp( my $curfs = `$file -sL $dev | $tr '[:upper:]' '[:lower:]' | grep -Eio '$fs' | uniq` );
 
@@ -1362,7 +1369,7 @@ foreach my $lv (@lvscan){
     my $lvcreate = `$lvm lvcreate -L${snap_size} -n $lvsnap -s /dev/$vgname/$lvname 2>&1`;
 
     if( $? eq 0 ){
-        logger("[INFO] Creating snapshot of $lvname (size: ${lvsize}${lvunit})", $lvname);
+        logger("[INFO] Snapshot of $lvname (size: ${lvsize}${lvunit}) created", $lvname);
     }else{
         logger("[ERR] failed to create snapshot of $lvname ($lvcreate, code: $?). Skip.",$lvname,'err');
 
