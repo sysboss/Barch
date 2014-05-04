@@ -493,6 +493,9 @@ sub cleanup {
     # remove temporary folders
     `$rm -fr $mount_dir/* $silent` if !$running;
 
+    # remove lock files
+    `rm -f $lvlock_dir/* $silent` if !$running;
+
     unlink $lockfile if !$running;
 }
 
