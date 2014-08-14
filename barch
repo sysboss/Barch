@@ -21,10 +21,10 @@ use Time::HiRes qw( gettimeofday );
 use File::Lockfile;
 use Net::OpenSSH;
 
-my $version = "6.0.552";
+my $version = "6.0.553";
 my $welcome = "Barch v$version - LVM backups manager";
 
-# tools
+# required tools
 chomp( my $lvm       = `which lvm`       ); if( !$lvm       ) { die "[ERR] No LVM found";       }
 chomp( my $lvs       = `which lvs`       ); if( !$lvs       ) { die "[ERR] No lvs found";       }
 chomp( my $vgs       = `which vgs`       ); if( !$vgs       ) { die "[ERR] No vgs found";       }
@@ -365,7 +365,7 @@ if ( $list_all ){
         if !$tree;
 
     chomp( my $deamon = `ps -ef | grep barchd | grep -v grep | wc -l` );
-    chomp( my $curst  = `ps -ef | grep "barch -i" | wc -l` );
+    chomp( my $curst  = `ps -ef | grep "barch -i" | grep -v grep | wc -l` );
 
     # get current time
     my @timenow = [gettimeofday];
@@ -495,6 +495,7 @@ sub cleanup {
 
     # remove lock files
     `rm -f $lvlock_dir/* $silent` if !$running;
+    `find /root/.cache/duplicity/ -name *.lock | xargs rm` if !$running;
 
     unlink $lockfile if !$running;
 }
