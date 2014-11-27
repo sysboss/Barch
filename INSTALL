@@ -3,7 +3,7 @@
 # version
 VERSION=6
 
-PACKAGES="perl lvm2 rsnapshot rsync kpartx tree python software-properties-common python-software-properties python-paramiko python-gobject-2 ncftp make gcc parted"
+PACKAGES="perl lvm2 rsnapshot rsync kpartx tree python software-properties-common python-software-properties python-paramiko python-gobject-2 ncftp make gcc parted duplicity"
 PERL_MODULES="Getopt::Long Config::Tiny POSIX LWP::Simple strictures Time::HiRes File::Lockfile Parallel::ForkManager DateTime Switch Net::OpenSSH"
 TOOLS="perl lvm rsnapshot rsync kpartx tree python ncftp duplicity make parted"
 NEW_INSTALL=true
