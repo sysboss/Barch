@@ -754,7 +754,7 @@ sub duplicity {
     $verbosity = "debug" if $debug;
 
     # SSH opts
-    my $ssh_opt = ' --ssh-options="-oStrictHostKeyChecking=no -oUserKnownHostsFile=/dev/null" --rsync-options="-raHXt"';
+    my $ssh_opt = "--ssh-options=\"-oStrictHostKeyChecking=no -oUserKnownHostsFile=/dev/null\" --rsync-options=\"-raHXt -e '-oStrictHostKeyChecking=no -oUserKnownHostsFile=/dev/null'\"";    
     $ssh_opt = '' if !$StrictHostKey;
 
     my $exc = "$duplicity --verbosity $verbosity $src_mismatch --volsize $volsize" .
