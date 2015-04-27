@@ -258,19 +258,6 @@ sub run {
         closelog();
     }
 
-    sub exit_fatal {
-        my( $msg, $ident ) = @_;
-        $ident = 'Main' if !$ident;
-
-        # write log
-        logger("FATAL: $msg",$ident,'crit')
-            if $msg;
-
-        # cleanup
-        cleanup();
-        exit 2;
-    }
-
     ####################
     # Verification     #
     ####################
@@ -652,6 +639,19 @@ sub run {
     $lockfile->remove;
 
     exit 0;
+}
+
+sub exit_fatal {
+    my( $msg, $ident ) = @_;
+    $ident = 'Main' if !$ident;
+
+    # write log
+    logger("FATAL: $msg",$ident,'crit')
+        if $msg;
+
+    # cleanup
+    cleanup();
+    exit 2;
 }
 
 # vim:sw=4:ts=4:et
