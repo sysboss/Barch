@@ -20,6 +20,31 @@ our $VERSION = "6.1";
 
 my $welcome = "Barch v$VERSION - LVM backups Solution";
 
+sub usage {
+    print << "_END_USAGE";
+$welcome
+Copyright (c) 2015 Alexey Baikov <sysboss\@mail.ru>
+
+usage: $0 [ options ] FROM
+
+Options:
+  -c|--cleanup             Recovery mode
+  -o|--only                Single logical volume to backup
+  -h|--help                Help (this info)
+  -f|--full                Force full backup
+  --version                Show version
+  --syntax                 Verify config file syntax
+
+Debug Options:
+  -v|--verbose             Log to stdout
+  -d|--debug               Debug mode (very verbose)
+  --dry-run                Discover only mode
+
+_END_USAGE
+
+    exit 0;
+}
+
 # TODO: some of these are not used (vgs, mount, etc.)
 # TODO: remove as many of these as possible
 # (e.g., "rm")
@@ -52,31 +77,6 @@ sub run {
     my $showV   ;
     my $dry_run ;
     my $full_now;
-
-    sub usage {
-        print << "_END_USAGE";
-$welcome
-Copyright (c) 2015 Alexey Baikov <sysboss\@mail.ru>
-
-usage: $0 [ options ] FROM
-
-Options:
-  -c|--cleanup             Recovery mode
-  -o|--only                Single logical volume to backup
-  -h|--help                Help (this info)
-  -f|--full                Force full backup
-  --version                Show version
-  --syntax                 Verify config file syntax
-
-Debug Options:
-  -v|--verbose             Log to stdout
-  -d|--debug               Debug mode (very verbose)
-  --dry-run                Discover only mode
-
-_END_USAGE
-
-        exit 0;
-    }
 
     GetOptions(
         'v|verbose'    => \$verbose,
