@@ -15,6 +15,7 @@ use AnyEvent::Util;
 use File::Lockfile;
 use Digest::MD5 'md5_hex';
 use Time::HiRes 'gettimeofday';
+use List::Util 'first';
 
 our $VERSION = "6.1";
 
@@ -104,23 +105,6 @@ sub run {
     my $pref = '_bsnap';
     my $conf = Config::Tiny->read( "$pwd/barchd.conf" );
 
-    sub in_config {
-        my $find = shift;
-
-        foreach my $item ( keys %{$conf} ){
-            if( $item eq $find ){ return 1 }
-        }
-        return 0;
-    }
-    sub in_arr {
-        my $key = shift;
-        my @arr = @_;
-
-        foreach my $item ( @arr ){
-            if( $item eq $key ){ return 1 }
-        }
-        return 0;
-    }
     sub check_config {
         die "$pwd/barch.conf file not found"
             if not -e "$pwd/barch.conf";
@@ -130,7 +114,7 @@ sub run {
         my $conf_ok  = 0;
 
         foreach my $section (@sections){
-            if( not in_config($section) ){
+            if ( ! first { $section eq $_ } keys %{$conf} ) {
                 print "$section section is missing.\nCheck you configuration file\n";
                 exit 2;
             }
