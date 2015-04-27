@@ -67,19 +67,18 @@ my %commands = map {
 local $SIG{'TERM'} = 'sigHandler';
 local $SIG{'INT'}  = 'sigHandler';
 
-sub run {
+# options
+my $verbose ;
+my $cleanup ;
+my $debug   ;
+my $chconfig;
+my $singleLV;
+my $showhelp;
+my $showV   ;
+my $dry_run ;
+my $full_now;
 
-    # options
-    my $verbose ;
-    my $cleanup ;
-    my $debug   ;
-    my $chconfig;
-    my $singleLV;
-    my $showhelp;
-    my $showV   ;
-    my $dry_run ;
-    my $full_now;
-
+sub getopt {
     GetOptions(
         'v|verbose'    => \$verbose,
         'version'      => \$showV,
@@ -91,6 +90,10 @@ sub run {
         'syntax'       => \$chconfig,
         'dry-run'      => \$dry_run,
     ) || usage( "bad option" );
+}
+
+sub run {
+    getopt();
 
     ####################
     # Variables        #
