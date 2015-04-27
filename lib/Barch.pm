@@ -575,8 +575,8 @@ _END_USAGE
             }
 
             my $www = run_cmd 'w',
-                '1' => sub { ::p @_ },
-                '2' => sub { ::p @_ };
+                '1' => sub { p @_ },
+                '2' => sub { p @_ };
 
             # remove instance PID
             undef $backups{ $hash{'lvname'} }{'pid'};
