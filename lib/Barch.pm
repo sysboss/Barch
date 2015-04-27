@@ -15,49 +15,14 @@ use AnyEvent::Util;
 use File::Lockfile;
 use Digest::MD5 'md5_hex';
 use Time::HiRes 'gettimeofday';
+use List::Util 'first';
 
 our $VERSION = "6.1";
 
 my $welcome = "Barch v$VERSION - LVM backups Solution";
 
-sub run {
-    # required tools
-    chomp( my $lvm       = `which lvm`       ); if( !$lvm       ) { die "[ERR] No LVM found";       }
-    chomp( my $lvs       = `which lvs`       ); if( !$lvs       ) { die "[ERR] No lvs found";       }
-    chomp( my $vgs       = `which vgs`       ); if( !$vgs       ) { die "[ERR] No vgs found";       }
-    chomp( my $rsync     = `which rsync`     ); if( !$rsync     ) { die "[ERR] No rsync found";     }
-    chomp( my $rm        = `which rm`        ); if( !$rm        ) { die "[ERR] No rm found";        }
-    chomp( my $tr        = `which tr`        ); if( !$tr        ) { die "[ERR] No tr found";        }
-    chomp( my $ssh       = `which ssh`       ); if( !$ssh       ) { die "[ERR] No ssh found";       }
-    chomp( my $mount     = `which mount`     ); if( !$mount     ) { die "[ERR] No mount found";     }
-    chomp( my $umount    = `which umount`    ); if( !$umount    ) { die "[ERR] No umount found";    }
-    chomp( my $file      = `which file`      ); if( !$file      ) { die "[ERR] No file found";      }
-    chomp( my $kpartx    = `which kpartx`    ); if( !$kpartx    ) { die "[ERR] No kpartx found";    }
-    chomp( my $duplicity = `which duplicity` ); if( !$duplicity ) { die "[ERR] No duplicity found"; }
-    chomp( my $nice      = `which nice`      ); if( !$nice      ) { die "[ERR] No nice found";      }
-    chomp( my $ionice    = `which ionice`    ); if( !$ionice    ) { die "[ERR] No ionice found";    }
-    chomp( my $gzip      = `which gzip`      ); if( !$gzip      ) { die "[ERR] No gzip found";      }
-    chomp( my $gpg       = `which gpg`       ); if( !$gpg       ) { die "[ERR] No gpg found";       }
-    chomp( my $parted    = `which parted`    ); if( !$parted    ) { die "[ERR] No parted found";    }
-    chomp( my $touch     = `which touch`     ); if( !$touch     ) { die "[ERR] No touch found";     }
-
-    # signals handler
-    $SIG{TERM} = 'sigHandler';
-    $SIG{INT}  = 'sigHandler';
-
-    # options
-    my $verbose ;
-    my $cleanup ;
-    my $debug   ;
-    my $chconfig;
-    my $singleLV;
-    my $showhelp;
-    my $showV   ;
-    my $dry_run ;
-    my $full_now;
-
-    sub usage {
-        print << "_END_USAGE";
+sub usage {
+    print << "_END_USAGE";
 $welcome
 Copyright (c) 2015 Alexey Baikov <sysboss\@mail.ru>
 
@@ -78,9 +43,42 @@ Debug Options:
 
 _END_USAGE
 
-        exit 0;
-    }
+    exit 0;
+}
 
+# TODO: some of these are not used (vgs, mount, etc.)
+# TODO: remove as many of these as possible
+# (e.g., "rm")
+# TODO: replace all the rest with System::Command or something
+my @required_commands = qw<
+    lvm lvs vgs rsync rm tr ssh mount umount file
+    kpartx duplicity nice ionice gzip gpg parted touch
+>;
+
+# required tools
+my %commands = map {
+    my $location = `which $_`
+        or die "[ERR] Command not found: $_\n";
+
+    $_ => $location;
+} @required_commands;
+
+# signals handler
+local $SIG{'TERM'} = 'sigHandler';
+local $SIG{'INT'}  = 'sigHandler';
+
+# options
+my $verbose ;
+my $cleanup ;
+my $debug   ;
+my $chconfig;
+my $singleLV;
+my $showhelp;
+my $showV   ;
+my $dry_run ;
+my $full_now;
+
+sub getopt {
     GetOptions(
         'v|verbose'    => \$verbose,
         'version'      => \$showV,
@@ -92,6 +90,10 @@ _END_USAGE
         'syntax'       => \$chconfig,
         'dry-run'      => \$dry_run,
     ) || usage( "bad option" );
+}
+
+sub run {
+    getopt();
 
     ####################
     # Variables        #
@@ -107,23 +109,6 @@ _END_USAGE
     my $pref = '_bsnap';
     my $conf = Config::Tiny->read( "$pwd/barchd.conf" );
 
-    sub in_config {
-        my $find = shift;
-
-        foreach my $item ( keys %{$conf} ){
-            if( $item eq $find ){ return 1 }
-        }
-        return 0;
-    }
-    sub in_arr {
-        my $key = shift;
-        my @arr = @_;
-
-        foreach my $item ( @arr ){
-            if( $item eq $key ){ return 1 }
-        }
-        return 0;
-    }
     sub check_config {
         die "$pwd/barch.conf file not found"
             if not -e "$pwd/barch.conf";
@@ -133,7 +118,7 @@ _END_USAGE
         my $conf_ok  = 0;
 
         foreach my $section (@sections){
-            if( not in_config($section) ){
+            if ( ! first { $section eq $_ } keys %{$conf} ) {
                 print "$section section is missing.\nCheck you configuration file\n";
                 exit 2;
             }
@@ -277,19 +262,6 @@ _END_USAGE
         closelog();
     }
 
-    sub exit_fatal {
-        my( $msg, $ident ) = @_;
-        $ident = 'Main' if !$ident;
-
-        # write log
-        logger("FATAL: $msg",$ident,'crit')
-            if $msg;
-
-        # cleanup
-        cleanup();
-        exit 2;
-    }
-
     ####################
     # Verification     #
     ####################
@@ -328,10 +300,10 @@ _END_USAGE
         my $running = shift;
 
         # umount all
-        `$umount -r $mount_dir/* $silent`;
+        `$commands{'umount'} -r $mount_dir/* $silent`;
 
         # destroy any possible snapshots
-        chomp( my @snaps = `$lvs | grep _bsnap` );
+        chomp( my @snaps = `$commands{'lvs'} | grep _bsnap` );
 
         if( @snaps ){
             foreach my $sn (@snaps){
@@ -344,13 +316,13 @@ _END_USAGE
                 }
 
                 # remove partitions, if any
-                `$kpartx -s -d /dev/$vgname/$lvname`;
+                `$commands{'kpartx'} -s -d /dev/$vgname/$lvname`;
 
                 # umount
-                `$umount $mount_dir/$lvname $silent`;
+                `$commands{'umount'} $mount_dir/$lvname $silent`;
 
                 # remove snapshot
-                `$lvm lvremove -f /dev/$vgname/$lvname $silent`;
+                `$commands{'lvm'} lvremove -f /dev/$vgname/$lvname $silent`;
 
                 if( $? eq 0 ){
                     logger(" - $vgname/$lvname snapshot removed.",$lvname);
@@ -363,11 +335,11 @@ _END_USAGE
         }
 
         # remove temporary folders
-        `$rm -fr $mount_dir/* $silent` if !$running;
+        `$commands{'rm'} -fr $mount_dir/* $silent` if !$running;
 
         # remove lock files
-        `rm -f $lock_dir/* $silent` if !$running;
-        `find /root/.cache/duplicity/ -name *.lock | xargs rm` if !$running;
+        `$commands{'rm'} -f $lock_dir/* $silent` if !$running;
+        `find /root/.cache/duplicity/ -name *.lock | xargs $commands{'rm'}` if !$running;
 
         #unlink $lockfile if !$running;
         $lockfile->remove if !$running;
@@ -376,19 +348,6 @@ _END_USAGE
     ####################
     # Subroutines      #
     ####################
-    sub parse_lvs {
-        shift =~ /^\s+(\w+|[aA-zZ0-9\-\_\.\+]*)\s+(\w+)\s+[^ ]+\s+([0-9\.]+)(\w)\s+(\w+\s+([0-9\.]+))?/;
-
-        return {
-            uid      => md5_hex("$1\@$2"),
-            lvname   => $1,
-            vgname   => $2,
-            size     => $3,
-            unit     => lc($4),
-            snapsize => $6,
-        };
-    }
-
     sub is_disabled_volume {
         my $lvname = shift;
 
@@ -415,14 +374,14 @@ _END_USAGE
             my $d = $k->{'disk'};
 
             next if not $d;
-            
+
             if( $d eq $disk ){
                 $drbd_disk = $d;
                 $drbd_dev  = $k->{'device'}{'content'};
                 last;
             }
         }
-        
+
         if( $drbd_disk ne '' ){
             my $drbd_name = ( split /\//, $drbd_disk )[-1];
 
@@ -461,7 +420,7 @@ _END_USAGE
         # not running
         logger("Volume is locked by other instance", $hash{'lvname'}, 'alert') and return
             if -e "$lock_dir/$hash{'lvname'}.lock";
-     
+
         # check last backup time
         $hash{'timestamp'} = $report->{$hash{'vgname'}.".".$hash{'lvname'}}->{'timestamp'};
 
@@ -543,7 +502,7 @@ _END_USAGE
         $lv_lock->write;
 
         # create snapshot
-        # my $lvcreate = `$lvm lvcreate -L${snap_size} -n $hash{'lvname'}${pref} -s $device`;
+        # my $lvcreate = `$commands{'lvm'} lvcreate -L${snap_size} -n $hash{'lvname'}${pref} -s $device`;
 
         # if( $? eq 0 ){
         #     logger("Snapshot created", $hash{'lvname'});
@@ -575,8 +534,8 @@ _END_USAGE
             }
 
             my $www = run_cmd 'w',
-                '1' => sub { ::p @_ },
-                '2' => sub { ::p @_ };
+                '1' => sub { p @_ },
+                '2' => sub { p @_ };
 
             # remove instance PID
             undef $backups{ $hash{'lvname'} }{'pid'};
@@ -619,10 +578,10 @@ _END_USAGE
 
     logger("Barch $VERSION started");
 
-    # create logical volumes watcher    
+    # create logical volumes watcher
     my $wlv = AE::timer 0, 300, sub {
         fork_call {
-            chomp( my @cmd = `$lvs` );
+            chomp( my @cmd = `$commands{'lvs'}` );
             return @cmd;
         } sub {
             return if not @_;
@@ -671,6 +630,32 @@ _END_USAGE
     $lockfile->remove;
 
     exit 0;
+}
+
+sub exit_fatal {
+    my( $msg, $ident ) = @_;
+    $ident = 'Main' if !$ident;
+
+    # write log
+    logger("FATAL: $msg",$ident,'crit')
+        if $msg;
+
+    # cleanup
+    cleanup();
+    exit 2;
+}
+
+sub parse_lvs {
+    shift =~ /^\s+(\w+|[aA-zZ0-9\-\_\.\+]*)\s+(\w+)\s+[^ ]+\s+([0-9\.]+)(\w)\s+(\w+\s+([0-9\.]+))?/;
+
+    return {
+        uid      => md5_hex("$1\@$2"),
+        lvname   => $1,
+        vgname   => $2,
+        size     => $3,
+        unit     => lc($4),
+        snapsize => $6,
+    };
 }
 
 # vim:sw=4:ts=4:et
