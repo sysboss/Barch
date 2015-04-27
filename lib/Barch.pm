@@ -63,10 +63,11 @@ my %commands = map {
     $_ => $location;
 } @required_commands;
 
+# signals handler
+local $SIG{'TERM'} = 'sigHandler';
+local $SIG{'INT'}  = 'sigHandler';
+
 sub run {
-    # signals handler
-    $SIG{TERM} = 'sigHandler';
-    $SIG{INT}  = 'sigHandler';
 
     # options
     my $verbose ;
