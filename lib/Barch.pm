@@ -415,14 +415,14 @@ _END_USAGE
             my $d = $k->{'disk'};
 
             next if not $d;
-            
+
             if( $d eq $disk ){
                 $drbd_disk = $d;
                 $drbd_dev  = $k->{'device'}{'content'};
                 last;
             }
         }
-        
+
         if( $drbd_disk ne '' ){
             my $drbd_name = ( split /\//, $drbd_disk )[-1];
 
@@ -461,7 +461,7 @@ _END_USAGE
         # not running
         logger("Volume is locked by other instance", $hash{'lvname'}, 'alert') and return
             if -e "$lock_dir/$hash{'lvname'}.lock";
-     
+
         # check last backup time
         $hash{'timestamp'} = $report->{$hash{'vgname'}.".".$hash{'lvname'}}->{'timestamp'};
 
@@ -619,7 +619,7 @@ _END_USAGE
 
     logger("Barch $VERSION started");
 
-    # create logical volumes watcher    
+    # create logical volumes watcher
     my $wlv = AE::timer 0, 300, sub {
         fork_call {
             chomp( my @cmd = `$lvs` );
