@@ -344,19 +344,6 @@ sub run {
     ####################
     # Subroutines      #
     ####################
-    sub parse_lvs {
-        shift =~ /^\s+(\w+|[aA-zZ0-9\-\_\.\+]*)\s+(\w+)\s+[^ ]+\s+([0-9\.]+)(\w)\s+(\w+\s+([0-9\.]+))?/;
-
-        return {
-            uid      => md5_hex("$1\@$2"),
-            lvname   => $1,
-            vgname   => $2,
-            size     => $3,
-            unit     => lc($4),
-            snapsize => $6,
-        };
-    }
-
     sub is_disabled_volume {
         my $lvname = shift;
 
@@ -652,6 +639,19 @@ sub exit_fatal {
     # cleanup
     cleanup();
     exit 2;
+}
+
+sub parse_lvs {
+    shift =~ /^\s+(\w+|[aA-zZ0-9\-\_\.\+]*)\s+(\w+)\s+[^ ]+\s+([0-9\.]+)(\w)\s+(\w+\s+([0-9\.]+))?/;
+
+    return {
+        uid      => md5_hex("$1\@$2"),
+        lvname   => $1,
+        vgname   => $2,
+        size     => $3,
+        unit     => lc($4),
+        snapsize => $6,
+    };
 }
 
 # vim:sw=4:ts=4:et
