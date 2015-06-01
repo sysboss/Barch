@@ -1,16 +1,16 @@
 #!/bin/bash
 
 # version
-VERSION=6
+VERSION=6.1
 
-PACKAGES="perl lvm2 rsnapshot rsync kpartx tree python software-properties-common python-software-properties python-paramiko python-gobject-2 ncftp make gcc parted duplicity curl"
-PERL_MODULES="Getopt::Long Config::Tiny POSIX LWP::Simple strictures Time::HiRes File::Lockfile Parallel::ForkManager DateTime Switch Net::OpenSSH"
-TOOLS="perl lvm rsnapshot rsync kpartx tree python ncftp duplicity make parted"
+PACKAGES="perl lvm2 kpartx parted ncftp make gcc duplicity curl"
+PERL_MODULES="AnyEvent POSIX XML::Simple List::Util Sys::Syslog Time::Piece Net::OpenSSH Getopt::Long Config::Tiny Twiggy::Server AnyEvent::Util File::Lockfile File::Find::Rule Digest::MD5 Time::HiRes Switch"
+TOOLS="perl lvm kpartx ncftp duplicity make parted"
 NEW_INSTALL=true
 
 clear
 
-echo "Welcome to Barch ${VERSION}.x Install tool"
+echo "Welcome to Barch ${VERSION}.x Install Tool"
 echo ""
 echo "Please make sure you have the following packages installed:"
 echo "  apt-get install / yum install "
@@ -32,7 +32,7 @@ then
         fi
     done
 
-    if which barch > /dev/null; then
+    if [ -f /etc/barch/barch ]; then
         NEW_INSTALL=false
     fi
 
@@ -47,7 +47,7 @@ then
         echo "├ cpanm installed"
     fi
 
-    echo "├ installing perl-modules"
+    echo "├ installing Perl-modules"
 
     for i in $PERL_MODULES; do
         echo -n "│ * installing $i"
@@ -65,7 +65,6 @@ then
 
     mkdir -p /etc/barch
     mkdir -p /usr/local/backup
-    mkdir -p /var/cache/barch/conf.d
     mkdir -p /var/cache/barch/mounts
     mkdir -p /var/lock/barch
 
@@ -73,8 +72,6 @@ then
     echo -n "├ copying files..."
 
     cp -ax barch /etc/barch/
-    cp -ax barchd /etc/barch/
-    cp -ax scheduler /etc/barch/
     cp -ax monitor.pl /etc/barch/
 
     echo " done"
@@ -84,44 +81,37 @@ then
         ln -s /etc/barch/barch /usr/local/bin/barch
     fi
 
-    if [ ! -f /usr/local/bin/barchd ]; then
-        ln -s /etc/barch/barchd /usr/local/bin/barchd
-    fi
-
-    touch /var/cache/barch/db.queue
-
     echo " done"
     echo -n "├ copying configuration..."
 
     if [ ! -f /etc/barch/barch.conf ]; then
         cp -ax barch.conf /etc/barch/
+    else
+        cp -ax barch.conf /etc/barch/barch.conf.NEW
     fi
 
     if [ ! -f /etc/barch/custom.conf ]; then
         cp -ax custom.conf /etc/barch/
-    fi
-
-    if [ ! -f /etc/barch/rsnapshot.conf ]; then
-        cp -ax rsnapshot.conf /etc/barch/
+    else
+        cp -ax custom.conf /etc/barch/custom.conf.NEW
     fi
 
     cp -ax version /etc/barch 
 
     echo " done"
+
+    cp -ax init.d/barchd /etc/init.d/barchd
+    chmod +x /etc/init.d/barchd
+
     echo ""
     echo "Installation complete"
 
     if [[ $NEW_INSTALL -eq 'false' ]]; then
         echo "A newer version installed. Please verify that you old configuration file is up-to-date."
+        echo "Use barch.conf.NEW and custom.conf.NEW as an example."
     fi
-
+    
     echo ""
-    echo "TIP: after configuration, run barchd deamon"
-    echo "and schedule backups using cron jobs:"
-    echo '0 0 * * *       /etc/barch/scheduler daily > /dev/null'
-    echo '1 2 * * 0       /etc/barch/scheduler weekly > /dev/null'
-    echo '1 5 1 * *       /etc/barch/scheduler monthly > /dev/null'
-    echo '1 8 1 1 *       /etc/barch/scheduler yearly > /dev/null'
 else
     echo ""
     echo "Come back later"

@@ -1,7 +1,0 @@
-#!/usr/bin/perl
-
-use strict;
-use warnings;
-use Barch;
-
-Barch->run;
