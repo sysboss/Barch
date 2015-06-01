@@ -2,38 +2,41 @@ Barch - LVM Backups manager
 ===========================
 
 ## Description ##
-An open source lvm snapshot and backup utility for linux based systems. Barch conducts automatic and predefined filesystem recognition. Supports full/incremental or hourly,daily,weekly backup formats. Based on dd, rsync, rsnapshot and duplicity.
+An open source LVM backup utility for linux based systems.  
+Barch conducts automatic and predefined volume structure recognition. Supports incremental backups. Based on duplicity.
 
 Key features:
  * Incremental backups
  * Parallel execution
  * DRBD clusters compatible
  * syslog logging
- * Built-in backups monitoring tool
+ * Monitoring utility
+ * HTTP web interface
 
 ### Introduction - How it works? ###
 Barch conducts LVM incremental backups by discovering entire hierarchy of each logical volume such as partitions, filesystems etc.  
 
 Before backup starts, Barch creates a snapshot of the target LV and mounts it to a temporary mount point. This allows the backup tool to sync changes (increments) between the last backup and the current state.  
 
-Barch is written in Perl and depends on duplicity, rsnapshot, rsync and kpartx. Please make sure this tools installed.
+Barch is written in Perl and depends on duplicity, rsync and kpartx. Please make sure this tools installed.
 
-For more reference regarding duplicity and rsnapshot, check: http://www.rsnapshot.org/ http://duplicity.nongnu.org/
+For more reference regarding duplicity, check: http://duplicity.nongnu.org/
 
 ## Requirements ##
 Required Packages:   
 ```
-perl lvm2 rsnapshot rsync kpartx tree python software-properties-common python-software-properties python-paramiko python-gobject-2 ncftp
+perl lvm2 rsync kpartx software-properties-common
 ```
 
 Required Perl-Moules:
 ```
-Getopt::Long Config::Tiny Log::Dispatchouli POSIX LWP::Simple strictures Time::HiRes File::Lockfile Parallel::ForkManager
+AnyEvent POSIX XML::Simple Sys::Syslog Time::Piece Net::OpenSSH Getopt::Long Config::Tiny Twiggy::Server AnyEvent::Util File::Lockfile File::Find::Rule Digest::MD5 Time::HiRes Switch List::Util
 ```
 
 ## Installation ##
-Clone files to some temporary folder on target host then run:  
+Clone files to some temporary folder on target host, then run the INSTALL script provided:  
 ```
+cd /tmp
 git clone git@github.com:sysboss/Barch.git
 ./INSTALL
 ```

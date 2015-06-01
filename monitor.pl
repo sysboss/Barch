@@ -1,4 +1,10 @@
 #!/usr/bin/perl
+#
+# Barch v6.1
+# Copyright (c) 2015 Alexey Baikov <sysboss[@]mail.ru>
+#
+# Barch monitoring utility
+#
 
 use strict;
 use warnings;
@@ -10,6 +16,14 @@ use Time::HiRes qw( gettimeofday );
 use Getopt::Long;
 use Switch;
 
+####################
+# Configuration    #
+####################
+my $pwd    = '/etc/barch';
+my $pref   = '_bsnap';
+my $cfg    = "$pwd/barchd.conf";
+my $conf   = Config::Tiny->read($cfg);
+my $cycle  = $conf->{default}{vol_cycle} || '12H';
 my %states = (
     OK       => 0,
     WARNING  => 1,
@@ -17,25 +31,41 @@ my %states = (
     UNKNOWN  => 3,
 );
 
-my $default_WARN = 86400;
-my $default_CRIT = 108000;
+sub convert_time {
+    my $time  = shift;
+    return if !$time;
 
-sub print_help {
-    print <<"__END";
-$0 [OPTIONS ...]
+    my $days  = int($time / 86400);
+       $time -= ($days * 86400);
+    my $hours = int($time / 3600);
+       $time -= ($hours * 3600);
+    my $minutes = int($time / 60);
+    my $seconds = $time % 60;
 
-Options:
-    -h | --help         shows this help menu
-    -v | --verbose      verbose mode
-    -u | --unit         set default unit to 1 day (24H)
+    $days    = $days    < 1 ? '' : $days  . 'd ';
+    $hours   = $hours   < 1 ? '' : $hours . 'h ';
+    $minutes = $minutes < 1 ? '' : $minutes.'m ';
 
-    -W | --warn         sets warning level since last backup in seconds  (default: $default_WARN)
-    -C | --crit         sets critical level since last backup in seconds (default: $default_CRIT)
-
-__END
-
-    exit $states{'OK'};
+    return "$days$hours$minutes${seconds}s";
 }
+
+sub parse_period {
+    my $string = shift;
+    my $cycle_regex = '^(\d+)(M|H|D|W)$';
+
+    # validate period syntax
+    $string =~ /$cycle_regex/i;
+    return 'invalid' if( !$1 or !$2 );
+
+    switch( uc($2) ){
+        case 'M' { return int( $1 * 60     ) }
+        case 'H' { return int( $1 * 3600   ) }
+        case 'D' { return int( $1 * 86400  ) }
+        case 'W' { return int( $1 * 604800 ) }
+    }
+    return 'invalid';
+}
+
 sub exit_status {
     my($msg,$exit_code) = @_;
 
@@ -43,150 +73,138 @@ sub exit_status {
     exit $exit_code;
 }
 
+# Set default thresholds
+$cycle = parse_period($cycle);
+
+my $default_WARN = $cycle + ($cycle / 2);
+my $default_CRIT = $cycle * 2;
+my $HdefaultWARN = convert_time($default_WARN);
+my $HdefaultCRIT = convert_time($default_CRIT);
+
+sub print_help {
+    print << "_END_USAGE";
+usage: $0 [OPTIONS ...] FROM
+
+Options:
+  -h|--help                Help (this info)
+  -v|--verbose             Verbose mode
+
+  -W|--warn                Warning threshold (default: $HdefaultWARN)
+  -C|--crit                Critical threshold (default: $HdefaultCRIT)
+
+_END_USAGE
+
+    exit $states{'OK'};
+}
+
 my $not_backedup_CRIT;
 my $not_backedup_WARN;
 my $verbose;
-my $unit;
 
 GetOptions(
     'h|help'    => sub { print_help },
-    'W|warn=i'  => \$not_backedup_WARN,
-    'C|crit=i'  => \$not_backedup_CRIT,
+    'W|warn=s'  => \$not_backedup_WARN,
+    'C|crit=s'  => \$not_backedup_CRIT,
     'v|verbose' => \$verbose,
-    'u|unit'    => \$unit,
-) or exit_status( 'Problem parsing options', $states{'UNKNOWN'} );
+) or exit_status('Unknown option', $states{'UNKNOWN'});
 
-if( $not_backedup_CRIT ){
-    $not_backedup_CRIT = $not_backedup_CRIT * 86400 if $unit;
-}else{
-    $not_backedup_CRIT = $default_CRIT;
-}
+$default_CRIT = parse_period($not_backedup_CRIT)
+    if $not_backedup_CRIT;
 
-if( $not_backedup_WARN ){
-    $not_backedup_WARN = $not_backedup_WARN * 86400 if $unit;
-}else{
-    $not_backedup_WARN = $default_WARN;
-}
+$default_WARN = parse_period($not_backedup_WARN)
+    if $not_backedup_WARN;
 
-print "CRIT: $not_backedup_CRIT : WARN: $not_backedup_WARN\n" if $verbose;
+print "Critical threshold should be greater then waring\n" and exit $states{'UNKNOWN'}
+    if $default_WARN > $default_CRIT;
 
+print "Critical threshold: $default_CRIT\n" .
+      "Warning threshold: $default_WARN\n\n" if $verbose;
+
+# variables
 my @timenow    = [gettimeofday];
-my $barch_conf = '/etc/barch/barch.conf';
 my $summary    = '';
 my $exit_code  = $states{'OK'};
+my $reportfile = $conf->{global}->{report} || '/var/cache/barch/status';
+my $custom     = Config::Tiny->read($conf->{advanced}{custom}) || '';
 
-if( !-e $barch_conf ){
-    exit_status( 'Barch config file not found' , $states{'UNKNOWN'} );
+# verify config exists
+exit_status('Barch config file not found' , $states{'UNKNOWN'})
+    if not -e $cfg;
+
+# verify report file exists
+exit_status('Barch report file not found' , $states{'UNKNOWN'})
+    if not -e $reportfile;
+
+my $report = Config::Tiny->read($reportfile)
+    or exit_status("CRITICAL failed to read report file", $states{'CRITICAL'});
+my $count  = keys %$report;
+
+# exit if no backups reported
+exit_status('WARNING no backups found', $states{'WARNING'} )
+    if $count < 1;
+
+sub is_custom {
+    my $section = shift;
+
+    if( $conf->{advanced}{custom} && -e $conf->{advanced}{custom} ){
+        foreach my $key ( keys %{ $custom } ){
+            return 1 if $key eq $section;
+        }}
+    return 0;
 }
 
-# read config
-my $config     = Config::Tiny->read($barch_conf);
-my $reportfile = $config->{global}->{report} || '/var/cache/barch/status';
+foreach my $section ( keys %$report ){
+    my $report_status = $report->{$section}{'status'};
+    my $report_code   = $report->{$section}{'exit_code'};
+    my $report_time   = $report->{$section}{'timestamp'};
+    my $fstype        = $report->{$section}{'fstype'} || 'unspecified';
 
-# cycles
-my $bc_ntfs    = $config->{dd}->{bc_ntfs}  || 'weekly';
-my $bc_unkwn   = $config->{dd}->{bc_unkwn} || 'weekly';
-
-if( !-e $reportfile ){
-    exit_status( 'Barch report file not found' , $states{'UNKNOWN'} );
-}else{
-    my $report = Config::Tiny->read($reportfile)
-        or exit_status("CRITICAL can't read report file", $states{'CRITICAL'});
-    my $count  = keys %$report;
-
-    if( $count < 1 ){
-        exit_status('WARNING no backups found', $states{'WARNING'} );
-    }
-
-    foreach my $section ( keys %$report ){
-        my $report_status = $report->{$section}->{'status'};
-        my $report_code   = $report->{$section}->{'exit_code'};
-        my $report_time   = $report->{$section}->{'timestamp'};
-        my $fstype        = $report->{$section}->{'fstype'} || 'unspecified';
-
-        if( !defined($report_status) || !defined($report_code) || !defined($report_time) ){
-            print "#$section:\n  Information is missing. skip\n" if $verbose;
+    if( is_custom($section) ){
+        if( $custom->{$section}{'backup'} eq 'false' ){
+            print "#$section:\n  Disabled in custom.conf. skip\n\n" if $verbose;
             next;
         }
-
-        my $elapsed_time  = $timenow[0][0] - $report_time;
-
-        print "#$section\n  Status: $report_status\n  Last backup: $elapsed_time sec ago.\n  Report as: " if $verbose;
-
-        # check exit code
-        if( $report_code ne '0' ){
-            if( $report_code ne '4' && $report_code ne '5' && $report_code ne '6' ){
-                print "CRITICAL\n\n" if $verbose;
-                $exit_code = $states{'CRITICAL'};
-                $summary .= $section . "(c) ";
-                next;
-            }else{
-                print "OK\n\n" if $verbose;
-                next;
-            }
-        }
-        # ntfs/unknown cycles
-        elsif( $fstype =~ m/ntfs|unknown/ ){
-            my $WARN;
-            my $CRIT;
-            my $CYCLE;
-
-            if( $fstype eq 'ntfs' ){
-                $CYCLE = $bc_ntfs;
-            }else{
-                $CYCLE = $bc_unkwn;
-            }
-
-            print "-> NTFS ($CYCLE) - " if $verbose;
-            switch ($CYCLE){
-              case 'daily' {
-                $WARN = $not_backedup_WARN;
-                $CRIT = $not_backedup_CRIT;
-                }
-              case 'weekly' {
-                $WARN = 2678400;
-                $CRIT = 2750400;
-                }
-              else {
-                $WARN = $not_backedup_WARN;
-                $CRIT = $not_backedup_CRIT;
-                }
-            }
-
-            if( $elapsed_time > $WARN ){
-                if( $elapsed_time > $CRIT ){
-                    print "CRITICAL-OLD\n\n" if $verbose;
-                    $exit_code = $states{'CRITICAL'};
-                    $summary .= $section . "(c-old) ";
-                    next;
-                }elsif( $elapsed_time > $WARN ){
-                    print "WARNING-OLD\n" if $verbose;
-                    $exit_code = $states{'WARNING'} if ($exit_code != $states{'CRITICAL'});
-                    $summary .= $section . "(w-old) ";
-                    next;
-                }
-            }else{
-                print "OK\n" if $verbose;
-            }
-        }
-        # time passed since last backup
-        elsif( $elapsed_time > $not_backedup_WARN ){
-            if( $elapsed_time > $not_backedup_CRIT ){
-                print "CRITICAL-OLD\n" if $verbose;
-                $exit_code = $states{'CRITICAL'};
-                $summary .= $section . "(c-old) ";
-                next;
-            }elsif( $elapsed_time > $not_backedup_WARN ){
-                print "WARNING-OLD\n" if $verbose;
-                $exit_code = $states{'WARNING'} if ($exit_code != $states{'CRITICAL'});
-                $summary .= $section . "(w-old) ";
-                next;
-            }
-        }else{
-            print "OK\n" if $verbose;
-        }
-        print "\n" if $verbose;
     }
+
+    if( !defined($report_status) || !defined($report_code) || !defined($report_time) ){
+        print "#$section:\n  Information is missing. skip\n\n" if $verbose;
+        next;
+    }
+
+    my $elapsed_time  = $timenow[0][0] - $report_time;
+
+    print "#$section\n  Status: $report_status\n  Last backup: $elapsed_time sec ago.\n  Report as: "
+        if $verbose;
+
+    # check exit code
+    if( $report_code ne '0' ){
+        if( $report_code ne '4' && $report_code ne '5' && $report_code ne '6' ){
+            print "CRITICAL\n\n" if $verbose;
+            $exit_code = $states{'CRITICAL'};
+            $summary .= $section . "(c) ";
+            next;
+        } else {
+            print "OK\n\n" if $verbose;
+            next;
+        }
+    }
+    # time passed since last backup
+    elsif( $elapsed_time > $default_WARN ){
+        if( $elapsed_time > $default_CRIT ){
+            print "CRITICAL-OLD\n" if $verbose;
+            $exit_code = $states{'CRITICAL'};
+            $summary .= $section . "(c-old) ";
+            next;
+        } elsif( $elapsed_time > $default_WARN ){
+            print "WARNING-OLD\n" if $verbose;
+            $exit_code = $states{'WARNING'} if ($exit_code != $states{'CRITICAL'});
+            $summary .= $section . "(w-old) ";
+            next;
+        }
+    } else {
+        print "OK\n" if $verbose;
+    }
+    print "\n" if $verbose;
 }
 
 if( $exit_code eq 0 ){

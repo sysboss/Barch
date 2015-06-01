@@ -1,0 +1,60 @@
+#!/bin/sh
+### BEGIN INIT INFO
+# Provides:          barch
+# Required-Start:    $network $syslog
+# Required-Stop:     $network $syslog
+# Default-Start:     2 3 4 5
+# Default-Stop:      0 1 6
+# Short-Description: Barch
+# Description:       Barch LVM backup solution
+# 
+### END INIT INFO
+
+PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+BARCH_DIR=/etc/barch
+DESC="Backup"
+NAME=barch
+DAEMON=/etc/barch/barch
+DAEMON_ARGS="-d"
+SCRIPTNAME=/etc/init.d/barchd
+PIDFile=/var/lock/barch/barch.pid
+
+# Exit if the package is not installed
+[ -x "$DAEMON" ] || exit 5
+
+# Using the lsb functions to perform the operations.
+. /lib/lsb/init-functions
+
+case "$1" in
+    start)
+        log_daemon_msg "Starting" "$NAME"
+
+        if start-stop-daemon --start --startas $DAEMON --pidfile $PIDFile -- --daemon ; then
+            log_end_msg 0
+        else
+            log_end_msg 1
+        fi
+        ;;
+    graceful)
+        echo -n "Sending stop request... "
+        touch /var/cache/barch/.graceful
+        echo "[SENT]"
+        ;;
+    abort)
+        echo -n "Stopping Barch... "
+        PID=$(cat $PIDFile)
+        kill $PID
+        echo "[SENT]"
+        ;;
+    #status)
+        #;;
+    #reload)
+        # not implemented
+        #;;
+    *)
+        echo "Usage: $SCRIPTNAME {start|abort|graceful|dry}" >&2
+        exit 3
+        ;;
+esac
+
+exit 0
