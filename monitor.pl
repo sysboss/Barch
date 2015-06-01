@@ -21,7 +21,7 @@ use Switch;
 ####################
 my $pwd    = '/etc/barch';
 my $pref   = '_bsnap';
-my $cfg    = "$pwd/barchd.conf";
+my $cfg    = "$pwd/barch.conf";
 my $conf   = Config::Tiny->read($cfg);
 my $cycle  = $conf->{default}{vol_cycle} || '12H';
 my %states = (
