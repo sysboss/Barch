@@ -12,6 +12,7 @@
 use strict;
 use warnings;
 
+use DDP;
 use Switch;
 use AnyEvent;
 use XML::Simple;
@@ -192,7 +193,6 @@ my $drbd_status = $conf->{drbd}{drbd_status}    || 'UpToDate';
 
 # Snapshots
 my $snap_size   = $conf->{snapshots}{snap_size} || '10G';
-my $snap_dir    = $conf->{snapshots}{snap_dir}  || '/usr/local/backup';
 my $max_snap    = $conf->{snapshots}{max_snap}  || 90;
 my %mount_opt   = ( 'default' => '-o acl -o noatime -r',
                     'xfs'     => '-o noatime -o ro'    ,
@@ -310,7 +310,6 @@ sub parse_period {
 # Verification     #
 ####################
 # verify required files/dirs exist
-mkdir $snap_dir if not -e $snap_dir;
 mkdir $lock_dir if not -e $lock_dir;
 `touch $reportfile`;
 
@@ -653,6 +652,7 @@ sub cleanup {
 
 sub reverse_cleanup {
     my %hash = @_;
+    sleep 3;
 
     foreach my $action ( @{ $hash{cleanup} } ){
         if( system($action) ne 0 ){
@@ -1281,6 +1281,9 @@ my $wdr = AE::timer $timer_drbd, $timer_drbd, sub {
 
             return @info;
         } sub {
+            return if !$_[0];
+            return if !$_[1];
+
             my $xml    = XML::Simple->new();
             $drbd_dump = $xml->XMLin($_[1]);
             @drbd_view = $_[0];
@@ -1410,13 +1413,14 @@ my $wlv = AE::timer 0, $timer_lvs, sub {
                 if $report->{$section};
         }
 
-        foreach my $section ( %{ $report } ){
-            my $uid = md5_hex($section);
+        foreach my $s ( keys %{ $report } ){
+            my $uid = md5_hex($s);
 
-            foreach my $lv ( keys %lvs_queue ){
-                next if $lvs_queue{ $uid };
-                delete $report->{$section};
-        }}
+            if( ! $lvs_queue{$uid} ){
+                delete $report->{$s}
+                    if $report->{$s};
+            }
+        }
     }
 };
 
