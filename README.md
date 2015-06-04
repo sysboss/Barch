@@ -25,7 +25,7 @@ For more reference regarding duplicity, check: http://duplicity.nongnu.org/
 ## Requirements ##
 Required Packages:   
 ```
-perl lvm2 rsync kpartx software-properties-common
+perl lvm2 rsync kpartx expat libexpat1 libexpat1-dev
 ```
 
 Required Perl-Moules:
@@ -37,7 +37,7 @@ AnyEvent POSIX XML::Simple Sys::Syslog Time::Piece Net::OpenSSH Getopt::Long Con
 Clone files to some temporary folder on target host, then run the INSTALL script provided:  
 ```
 cd /tmp
-git clone git@github.com:sysboss/Barch.git
+git clone https://github.com/sysboss/Barch.git
 ./INSTALL
 ```
 

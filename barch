@@ -1469,13 +1469,19 @@ my $wqueue = AE::timer 5, 1, sub {
 
     # graceful stop
     # do NOT start new backups
-    if( -e $stop_file && $running < 1 ){
-        # remove stop file
-        `rm -f $stop_file`;
+    if( -e $stop_file ){
+        # truncate queue
+        @q_order = ();
+        %queue   = ();
 
-        # cleanup
-        sigHandler('INT') ;
-        return;
+        if( $running < 1 ){
+            # remove stop file
+            `rm -f $stop_file`;
+
+            # cleanup
+            sigHandler('INT') ;
+            return;
+        }
     }
 
     return if $tasks   < 1;
