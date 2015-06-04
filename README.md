@@ -1,17 +1,17 @@
-Barch - LVM Backups manager
+Barch - LVM Backup Manager
 ===========================
 
 ## Description ##
 An open source LVM backup utility for linux based systems.  
-Barch conducts automatic and predefined volume structure recognition. Supports incremental backups. Based on duplicity.
+Barch conducts automatic and predefined volume structure recognition. Supports full/incremental backups. Based on duplicity.
 
 Key features:
  * Incremental backups
  * Parallel execution
- * DRBD clusters compatible
- * syslog logging
- * Monitoring utility
  * HTTP web interface
+ * DRBD clusters compatible
+ * Syslog logging
+ * Monitoring utility
 
 ### Introduction - How it works? ###
 Barch conducts LVM incremental backups by discovering entire hierarchy of each logical volume such as partitions, filesystems etc.  
@@ -30,7 +30,7 @@ perl lvm2 rsync kpartx expat libexpat1 libexpat1-dev
 
 Required Perl-Moules:
 ```
-AnyEvent POSIX XML::Simple Sys::Syslog Time::Piece Net::OpenSSH Getopt::Long Config::Tiny Twiggy::Server AnyEvent::Util File::Lockfile File::Find::Rule Digest::MD5 Time::HiRes Switch List::Util
+AnyEvent POSIX XML::Simple Sys::Syslog Time::Piece Net::OpenSSH Getopt::Long Config::Tiny Twiggy::Server AnyEvent::Util File::Lockfile File::Find::Rule Digest::MD5 Time::HiRes Switch List::Util DDP
 ```
 
 ## Installation ##
