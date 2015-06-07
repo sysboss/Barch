@@ -37,7 +37,7 @@ then
     fi
 
     clear
-    echo "Barch - LVM Backups Manager"
+    echo "Barch - LVM Backup Manager"
 
     if ! which cpanm > /dev/null; then
         echo "├ cpanm not installed"

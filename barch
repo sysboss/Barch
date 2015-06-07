@@ -31,7 +31,7 @@ use Digest::MD5 'md5_hex';
 use Time::HiRes 'gettimeofday';
 
 my $version = "6.1";
-my $welcome = "Barch v$version - LVM backup Solution";
+my $welcome = "Barch v$version - LVM Backup Solution";
 
 # required tools
 chomp( my $lvm       = `which lvm`       ); if( !$lvm       ){ die "[ERR] No LVM found";       }
@@ -402,7 +402,7 @@ sub parse_lvs {
 
 sub convert_time {
     my $time  = shift;
-    return if !$time;
+    return "error" if ! $time;
 
     my $days  = int($time / 86400);
        $time -= ($days * 86400);
@@ -711,13 +711,13 @@ sub report {
     # create new section
     else{
         $report->{$section} = {
-                date      => $date,
-                timestamp => "$timestamp[0][0]",
-                elapsed   => $hash{'elapsed'},
-                status    => $hash{'status'},
-                exit_code => $hash{'code'},
-                fstype    => $hash{'fstype'},
-                hostname  => $localhost,
+            date      => $date,
+            timestamp => "$timestamp[0][0]",
+            elapsed   => $hash{'elapsed'},
+            status    => $hash{'status'},
+            exit_code => $hash{'code'},
+            fstype    => $hash{'fstype'},
+            hostname  => $localhost,
         };
     }
 }
@@ -1272,23 +1272,23 @@ logger("Starting pre-backup procedures");
 # create DRBD watcher
 # every 10min
 my $wdr = AE::timer $timer_drbd, $timer_drbd, sub {
-    if( $check_drbd eq 'true' ){
-        fork_call {
-            my @info = ();
+    return if $check_drbd ne 'true';
 
-            chomp($info[0] = `drbd-overview`);
-            chomp($info[1] = `drbdadm dump-xml`);
+    fork_call {
+        my @info = ();
 
-            return @info;
-        } sub {
-            return if !$_[0];
-            return if !$_[1];
+        chomp($info[0] = `drbd-overview`);
+        chomp($info[1] = `drbdadm dump-xml`);
 
-            my $xml    = XML::Simple->new();
-            $drbd_dump = $xml->XMLin($_[1]);
-            @drbd_view = $_[0];
-        };
-    }
+        return @info;
+    } sub {
+        return if !$_[0];
+        return if !$_[1];
+
+        my $xml    = XML::Simple->new();
+        $drbd_dump = $xml->XMLin($_[1]);
+        @drbd_view = $_[0];
+    };
 };
 
 if( $check_drbd eq 'true' ){
@@ -1341,8 +1341,7 @@ my $wlv = AE::timer 0, $timer_lvs, sub {
                 parse_lvs( $volumes[$i] )
             };
 
-            # if --only option
-            # specified
+            # if --only option specified
             if( $singleLV ){
                 next if ( $hash{'lvname'} ne $singleLV );
             }
@@ -1448,26 +1447,25 @@ my $wqueue = AE::timer 5, 1, sub {
             }
 
             # maxtransfertime
-            next if( $backups{$volume}{'watcher'} < $trans_wait );
+            next if $backups{$volume}{'watcher'} < $trans_wait;
 
             my $cmd = "$ssh -l $ssh_user $ssh_server 'du -hs $ssh_path/$instance/$hash{'lvname'}'";
             my $watcher = run_cmd $cmd,
                '1>' => sub {
-                    if( @_ ){
-                        chomp( my $result = $_[0] );
-                        $result =~ /^(\d+)(\w)\t+.*/;
+                    return if ! @_;
 
-                        if( $1 && $2 ){
-                            if( $backups{$volume}{'remsize'} ){
-                                logger("No data transfered to backup server during the last ".
-                                       convert_time($trans_wait), $hash{'lvname'}, 'warning'
-                                      ) if( $backups{$volume}{'remsize'} eq "$1$2" );
-                            } else {
-                                $backups{$volume}{'remsize'} = "$1$2";
-                            }
-                        }
-                    }
-                };
+                    chomp( my $result = $_[0] );
+                    $result =~ /^(\d+)(\w)\t+.*/;
+
+                    return if ! $1 || !$2;
+
+                    if( $backups{$volume}{'remsize'} ){
+                        logger("No data transfered to backup server during the last ".
+                               convert_time($trans_wait), $hash{'lvname'}, 'warning' )
+                        if $backups{$volume}{'remsize'} eq "$1$2";
+                    } else {
+                        $backups{$volume}{'remsize'} = "$1$2";
+                }};
             $backups{$volume}{'watcher'} = 1;
     }}
 
@@ -1481,8 +1479,6 @@ my $wqueue = AE::timer 5, 1, sub {
         if( $running < 1 ){
             # remove stop file
             `rm -f $stop_file`;
-
-            # cleanup
             sigHandler('INT') ;
             return;
         }
@@ -1545,6 +1541,7 @@ sub sigHandler {
 
     # verify all snapshots removed
     chomp( my @snaps = `$lvs | grep $pref` );
+
     logger("Barch failed to remove one or more snapshot(s)",'Main','crit')
         if @snaps;
 
