@@ -9,12 +9,12 @@
 use strict;
 use warnings;
 
-use Config::Tiny;
-use DateTime;
-use POSIX qw/strftime/;
-use Time::HiRes qw( gettimeofday );
-use Getopt::Long;
 use Switch;
+use DateTime;
+use Getopt::Long;
+use Config::Tiny;
+use POSIX       qw(   strftime   );
+use Time::HiRes qw( gettimeofday );
 
 ####################
 # Configuration    #
@@ -88,6 +88,7 @@ usage: $0 [OPTIONS ...] FROM
 Options:
   -h|--help                Help (this info)
   -v|--verbose             Verbose mode
+  -e|--erronly             Show only failed backups
 
   -W|--warn                Warning threshold (default: $HdefaultWARN)
   -C|--crit                Critical threshold (default: $HdefaultCRIT)
@@ -100,12 +101,14 @@ _END_USAGE
 my $not_backedup_CRIT;
 my $not_backedup_WARN;
 my $verbose;
+my $erronly;
 
 GetOptions(
     'h|help'    => sub { print_help },
     'W|warn=s'  => \$not_backedup_WARN,
     'C|crit=s'  => \$not_backedup_CRIT,
     'v|verbose' => \$verbose,
+    'e|erronly' => \$erronly,
 ) or exit_status('Unknown option', $states{'UNKNOWN'});
 
 $default_CRIT = parse_period($not_backedup_CRIT)
@@ -161,50 +164,44 @@ foreach my $section ( keys %$report ){
 
     if( is_custom($section) ){
         if( $custom->{$section}{'backup'} eq 'false' ){
-            print "#$section:\n  Disabled in custom.conf. skip\n\n" if $verbose;
+            print "[$section]\n  Disabled in custom.conf. skip\n\n" if $verbose;
             next;
         }
     }
 
     if( !defined($report_status) || !defined($report_code) || !defined($report_time) ){
-        print "#$section:\n  Information is missing. skip\n\n" if $verbose;
+        print "[$section]\n  Information is missing. Skip\n\n" if $verbose;
         next;
     }
 
-    my $elapsed_time  = $timenow[0][0] - $report_time;
-
-    print "#$section\n  Status: $report_status\n  Last backup: $elapsed_time sec ago.\n  Report as: "
-        if $verbose;
+    my $elapsed_time = $timenow[0][0] - $report_time;
+    my $report_as    = 'OK';
 
     # check exit code
     if( $report_code ne '0' ){
         if( $report_code ne '4' && $report_code ne '5' && $report_code ne '6' ){
-            print "CRITICAL\n\n" if $verbose;
+            $report_as = 'CRITICAL';
             $exit_code = $states{'CRITICAL'};
             $summary .= $section . "(c) ";
-            next;
         } else {
-            print "OK\n\n" if $verbose;
-            next;
+            $report_as = 'OK';
         }
     }
     # time passed since last backup
     elsif( $elapsed_time > $default_WARN ){
         if( $elapsed_time > $default_CRIT ){
-            print "CRITICAL-OLD\n" if $verbose;
+            $report_as = "CRITICAL-OLD";
             $exit_code = $states{'CRITICAL'};
             $summary .= $section . "(c-old) ";
-            next;
         } elsif( $elapsed_time > $default_WARN ){
-            print "WARNING-OLD\n" if $verbose;
+            $report_as = "WARNING-OLD";
             $exit_code = $states{'WARNING'} if ($exit_code != $states{'CRITICAL'});
             $summary .= $section . "(w-old) ";
-            next;
         }
-    } else {
-        print "OK\n" if $verbose;
     }
-    print "\n" if $verbose;
+
+    print "[$section]\n  Status: $report_status\n  Last backup: $elapsed_time sec ago.\n  Report as: $report_as\n\n"
+        if( $verbose && ( $erronly && $report_as ne 'OK' ) );
 }
 
 if( $exit_code eq 0 ){
@@ -213,6 +210,8 @@ if( $exit_code eq 0 ){
     exit_status( "WARNING: $summary", $exit_code );
 }elsif( $exit_code eq 2 ){
     exit_status( "CRITICAL: $summary", $exit_code );
-}else{
+} else {
     exit_status( "UNKNOWN", $states{'UNKNOWN'} );
 }
+
+# vim:sw=4:ts=4:et
