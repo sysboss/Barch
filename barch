@@ -12,7 +12,7 @@
 use strict;
 use warnings;
 
-use DDP;
+use JSON;
 use Switch;
 use AnyEvent;
 use XML::Simple;
@@ -441,6 +441,9 @@ sub check_drbd_state {
     my $disk      = "/dev/$vgname/$lvname";
     my $drbd_dev  = '';
     my $drbd_disk = '';
+
+    logger("DRBD configuration missing. Cannot identify DRBD device",$lvname,'err')
+        if ! $drbd_dump->{'resource'};
 
     foreach my $resurce ( keys $drbd_dump->{'resource'} ){
         my $k = $drbd_dump->{'resource'}{$resurce}{'host'}{$localhost}{'volume'};
@@ -1013,7 +1016,7 @@ sub backup {
 
     # check DRBD state if exist
     # and enabled in config
-    if( @drbd_view && lc($check_drbd) eq 'true' ){
+    if( lc($check_drbd) eq 'true' ){
         $hash{'drbd'} = check_drbd_state($hash{'vgname'}, $hash{'lvname'});
 
         if( $hash{'drbd'}->{'dev'} ne 'undefined' ){
@@ -1043,9 +1046,12 @@ sub backup {
                        $hash{'lvname'},'warning' );
                 return;
             }
-        }
 
-        logger("DRBD detected", $hash{'lvname'}, 'debug');
+            logger("DRBD detected (state: ".$hash{'drbd'}->{'state'}.", conn: ".$hash{'drbd'}->{'conn'}.", ".
+                   "status: ".$hash{'drbd'}->{'status'}.")", $hash{'lvname'}, 'debug');
+        } else {
+            logger("No DRBD device found", $hash{'lvname'}, 'debug');
+        }
     }
 
     ### Backup process START
@@ -1154,6 +1160,7 @@ sub backup {
             $lv_lock->remove;
         }
 
+        sleep 0.5;
         clear_duplicity_locks();
         return %hash;
     } sub {
@@ -1528,16 +1535,19 @@ sub sigHandler {
         # cleanup
         reverse_cleanup( %hash );
 
-        # remove stop file
-        `rm -f $stop_file`
-            if -e $stop_file;
-
         logger("Backup terminated (SIG: @_)", $hash{'lvname'},'err');
     }
+
+    # remove stop file
+    `rm -f $stop_file`
+        if -e $stop_file;
 
     # remove lockfile
     `rm -f ${lock_dir}/${pidfile}`
         if "${lock_dir}/${pidfile}" ne '/';
+
+    # duble check
+    cleanup();
 
     # verify all snapshots removed
     chomp( my @snaps = `$lvs | grep $pref` );
@@ -1596,7 +1606,13 @@ $httpd->register_service( sub {
 
         foreach my $q ( keys %backups ){
             my $remsize = $backups{$q}{'remsize'} || '';
-            push @running, "$backups{$q}{'lvname'} $remsize";
+            my $drbddev = '';
+
+            if( $backups{$q}{'drbd'}->{'dev'} ne 'undefined' ){
+                $drbddev = '[DRBD] ';
+            }
+
+            push @running, "${drbddev}$backups{$q}{'lvname'} $remsize";
         }
 
         foreach my $j ( @q_order ){
@@ -1633,10 +1649,11 @@ $httpd->register_service( sub {
             [ $page ],
         ];
     } elsif( $path eq '/backups' ){
+        my $json = encode_json \%backups;
         return [
             200,
             [ 'Content-type' => 'text/plain' ],
-            [ p( %backups ) ],
+            [ $json ],
         ];
     } else {
         return [

@@ -30,7 +30,7 @@ perl lvm2 rsync kpartx expat libexpat1 libexpat1-dev
 
 Required Perl-Moules:
 ```
-AnyEvent POSIX XML::Simple Sys::Syslog Time::Piece Net::OpenSSH Getopt::Long Config::Tiny Twiggy::Server AnyEvent::Util File::Lockfile File::Find::Rule Digest::MD5 Time::HiRes Switch List::Util DDP
+AnyEvent POSIX XML::Simple Sys::Syslog Time::Piece Net::OpenSSH Getopt::Long Config::Tiny Twiggy::Server AnyEvent::Util File::Lockfile File::Find::Rule Digest::MD5 Time::HiRes Switch List::Util JSON
 ```
 
 ## Installation ##

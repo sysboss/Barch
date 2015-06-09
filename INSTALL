@@ -4,7 +4,7 @@
 VERSION=6.1
 
 PACKAGES="perl lvm2 kpartx parted ncftp make gcc duplicity curl expat libexpat1 libexpat1-dev"
-PERL_MODULES="AnyEvent DDP POSIX XML::Simple List::Util Sys::Syslog Time::Piece Net::OpenSSH Getopt::Long Config::Tiny Twiggy::Server AnyEvent::Util File::Lockfile File::Find::Rule Digest::MD5 Time::HiRes Switch"
+PERL_MODULES="AnyEvent JSON POSIX XML::Simple List::Util Sys::Syslog Time::Piece Net::OpenSSH Getopt::Long Config::Tiny Twiggy::Server AnyEvent::Util File::Lockfile File::Find::Rule Digest::MD5 Time::HiRes Switch"
 TOOLS="perl lvm kpartx ncftp duplicity make parted"
 NEW_INSTALL=true
 
