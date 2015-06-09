@@ -16,6 +16,7 @@ DESC="Backup"
 NAME=barch
 DAEMON=/etc/barch/barch
 DAEMON_ARGS="-d"
+MONITOR=/etc/barch/monitor.pl
 SCRIPTNAME=/etc/init.d/barchd
 PIDFile=/var/lock/barch/barch.pid
 
@@ -36,23 +37,27 @@ case "$1" in
         fi
         ;;
     graceful)
-        echo -n "Sending stop request... "
+        log_daemon_msg "Sending stop request"
         touch /var/cache/barch/.graceful
-        echo "[SENT]"
+        log_end_msg 0
         ;;
     abort)
-        echo -n "Stopping Barch... "
+        log_daemon_msg "Stopping" "$NAME"
         PID=$(cat $PIDFile)
         kill $PID
-        echo "[SENT]"
+        log_end_msg 0
         ;;
-    #status)
-        #;;
-    #reload)
-        # not implemented
-        #;;
+    cleanup)
+        log_daemon_msg "Starting" "$NAME cleanup"
+        STATUS=$($DAEMON -c)
+        echo $STATUS
+        ;;
+    status)
+        $MONITOR -v
+        exit $?
+        ;;
     *)
-        echo "Usage: $SCRIPTNAME {start|abort|graceful|dry}" >&2
+        echo "Usage: $SCRIPTNAME {start|abort|graceful|status|cleanup}" >&2
         exit 3
         ;;
 esac
