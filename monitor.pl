@@ -88,7 +88,7 @@ usage: $0 [OPTIONS ...] FROM
 Options:
   -h|--help                Help (this info)
   -v|--verbose             Verbose mode
-  -e|--erronly             Show only failed backups
+  -e|--erronly             Display errors only
 
   -W|--warn                Warning threshold (default: $HdefaultWARN)
   -C|--crit                Critical threshold (default: $HdefaultCRIT)
@@ -120,8 +120,9 @@ $default_WARN = parse_period($not_backedup_WARN)
 print "Critical threshold should be greater then waring\n" and exit $states{'UNKNOWN'}
     if $default_WARN > $default_CRIT;
 
-print "Critical threshold: $default_CRIT\n" .
-      "Warning threshold: $default_WARN\n\n" if $verbose;
+print "Critical threshold: $default_CRIT (" . convert_time($default_CRIT) .")\n" .
+      "Warning threshold: $default_WARN (" . convert_time($default_WARN) . ")\n\n"
+      if $verbose;
 
 # variables
 my @timenow    = [gettimeofday];
@@ -164,7 +165,8 @@ foreach my $section ( keys %$report ){
 
     if( is_custom($section) ){
         if( $custom->{$section}{'backup'} eq 'false' ){
-            print "[$section]\n  Disabled in custom.conf. skip\n\n" if $verbose;
+            print "[$section]\n  Disabled in custom.conf. skip\n\n"
+                if $verbose && not $erronly;
             next;
         }
     }
