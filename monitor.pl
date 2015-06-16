@@ -202,8 +202,10 @@ foreach my $section ( keys %$report ){
         }
     }
 
+    next if( $erronly && $report_as eq 'OK' );
+
     print "[$section]\n  Status: $report_status\n  Last backup: $elapsed_time sec ago.\n  Report as: $report_as\n\n"
-        if( $verbose && ( $erronly && $report_as ne 'OK' ) );
+        if $verbose;
 }
 
 if( $exit_code eq 0 ){

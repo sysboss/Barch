@@ -21,9 +21,11 @@ use Time::Piece;
 use Net::OpenSSH;
 use Getopt::Long;
 use Config::Tiny;
+use LWP::UserAgent;
 use Twiggy::Server;
 use AnyEvent::Util;
 use File::Lockfile;
+use AnyEvent::HTTP;
 use File::Find::Rule;
 use POSIX       'setsid';
 use List::Util  'first';
@@ -191,6 +193,11 @@ my $drbd_state  = $conf->{drbd}{drbd_state}     || 'any';
 my $drbd_conn   = $conf->{drbd}{drbd_conn}      || 'Connected';
 my $drbd_status = $conf->{drbd}{drbd_status}    || 'UpToDate';
 
+# DRBD Cluster
+my $member_ip   = $conf->{cluster}{member};
+my $member_port = $conf->{cluster}{port};
+my $member_err  = $conf->{cluster}{on_error}    || 'abort';
+
 # Snapshots
 my $snap_size   = $conf->{snapshots}{snap_size} || '10G';
 my $max_snap    = $conf->{snapshots}{max_snap}  || 90;
@@ -237,20 +244,21 @@ chomp( my $localhost = `hostname` );
 my $silent      = ' 1>/dev/null 2>/dev/null';
    $silent      = '' if $debug;
 
-# Globals
-my $cv          = AE::cv;
-my $report      = Config::Tiny->read( $reportfile ) || '';
-my $custom      = Config::Tiny->read( $customconf ) || '';
-my $duplcache   = '/root/.cache/duplicity/';
-my $cycle_regex = '^(\d+)(M|H|D|W)$';
-my $fs_support  = 'ext(2|3|4)|swap|luks|lvm2';
-my $mountablefs = 'ext(2|3|4)';
-my %backups     = ();
-my %lvs_queue   = ();
-my @lvs_array   = ();
-my %queue       = ();
-my @q_order     = ();
-my %fullreport  = ();
+# Global variables
+my $cv             = AE::cv;
+my $report         = Config::Tiny->read( $reportfile ) || '';
+my $custom         = Config::Tiny->read( $customconf ) || '';
+my $duplcache      = '/root/.cache/duplicity/';
+my $cycle_regex    = '^(\d+)(M|H|D|W)$';
+my $fs_support     = 'ext(2|3|4)|swap|luks|lvm2';
+my $mountablefs    = 'ext(2|3|4)';
+my $cluster_status = 0;
+my %backups        = ();
+my %lvs_queue      = ();
+my @lvs_array      = ();
+my %queue          = ();
+my @q_order        = ();
+my %fullreport     = ();
 
 ####################
 # Logging          #
@@ -310,7 +318,8 @@ sub parse_period {
 # Verification     #
 ####################
 # verify required files/dirs exist
-mkdir $lock_dir if not -e $lock_dir;
+mkdir $lock_dir  if not -e $lock_dir;
+mkdir $mount_dir if not -e $mount_dir;
 `touch $reportfile`;
 
 # Create lock file
@@ -381,6 +390,11 @@ foreach my $file ( @lock_files ){
 }
 $lockfile->write;
 
+# remove old mount points
+# if left after crash
+`rm -fr $mount_dir/*`
+    if $mount_dir ne '/';
+
 ####################
 # Subroutines      #
 ####################
@@ -436,6 +450,41 @@ sub is_disabled_volume {
     return 0;
 }
 
+sub check_cluster_status {
+    http_get "http://$member_ip:$member_port/status", sub {
+        my( $body, $hdr ) = @_;
+
+        if( $hdr->{Status} =~ /^2/ ){
+            logger("Successfuly connected to cluster member $member_ip:$member_port")
+                if $cluster_status != 1;
+            $cluster_status = 1;
+
+            # synchronize status
+            my $status = decode_json $body;
+
+            foreach my $section ( keys %{ $status } ){
+                my %remote = %{ $status->{$section} };
+                my %local  = %{ $report->{$section} }
+                    if $report->{$section};
+
+                # nothing to sync
+                next if ! %remote;
+
+                # compare states
+                if( ! %local ){
+                    $report->{$section} = \%remote;
+                } else {
+                    $report->{$section} = \%remote
+                        if $local{'timestamp'} < $remote{'timestamp'};
+                }
+            }
+        } else {
+            logger("Waiting for cluster member $member_ip:$member_port");
+            $cluster_status = 0;
+        }
+    };
+}
+
 sub check_drbd_state {
     my ($vgname, $lvname) = @_;
     my $disk      = "/dev/$vgname/$lvname";
@@ -463,6 +512,8 @@ sub check_drbd_state {
 
         foreach my $dev ( @drbd_view ){
         $dev =~ /^\s+\d+\:(\w+|[aA-zZ0-9\-\_\.\+]*)\/\d+\s+(\w+)\s+(\w+)\/\w+\s+(\w+)\/.*/;
+
+        last if ! $1;
 
         if( $1 eq $drbd_name && $2 && $3 && 4 ){
             return {
@@ -696,14 +747,14 @@ sub create_remote_dir {
 sub report {
     my %hash      = @_;
     my $section   = "$hash{'vgname'}.$hash{'lvname'}";
-    my $date      = localtime(time);
+    my $date      = localtime;
     my @timestamp = [gettimeofday];
 
     return if $dry_run;
 
     # update existing
     if( $report->{$section} ){
-        $report->{$section}{date}      = $date;
+        $report->{$section}{date}      = $date->cdate;
         $report->{$section}{timestamp} = "$timestamp[0][0]";
         $report->{$section}{elapsed}   = $hash{'elapsed'};
         $report->{$section}{exit_code} = $hash{'code'};
@@ -714,7 +765,7 @@ sub report {
     # create new section
     else{
         $report->{$section} = {
-            date      => $date,
+            date      => $date->cdate,
             timestamp => "$timestamp[0][0]",
             elapsed   => $hash{'elapsed'},
             status    => $hash{'status'},
@@ -834,7 +885,6 @@ sub discover {
 
             # cleanup
             push(@{ $hash{cleanup} }, "$kpartx -s -d $hash{'blkdev'}");
-
             %hash = %data;
         }
     }
@@ -970,6 +1020,56 @@ sub discover {
     }
 }
 
+sub is_locked_HTTP {
+    my %hash = @_;
+    my $ua   = LWP::UserAgent->new;
+    my $resp = $ua->get("http://$member_ip:$member_port/backups");
+
+    if( $resp->is_success ){
+        my $body = decode_json $resp->decoded_content;
+
+        foreach my $volume ( keys %{ $body } ){
+            my %remDRBD = %{ $body->{$volume} };
+
+            return 'locked' if(
+                $remDRBD{'vgname'} eq $hash{'vgname'} &&
+                $remDRBD{'lvname'} eq $hash{'lvname'}
+            );
+        }
+    } else {
+        logger("Cluster member $member_ip:$member_port is unreachable",$hash{'lvname'},'warning');
+        return 'error';
+    }
+
+    return 'not locked';
+}
+
+sub latest_timestamp {
+    my %hash    = @_;
+    my $section = "$hash{'vgname'}.$hash{'lvname'}";
+    my $ua      = LWP::UserAgent->new;
+    my $resp    = $ua->get("http://$member_ip:$member_port/status");
+
+    if( $resp->is_success ){
+        my $status = decode_json $resp->decoded_content;
+        return $hash{'timestamp'} if ! $status->{$section};
+
+        if( $status->{$section} ){
+            return if ! $hash{'timestamp'};
+            my %remote = %{ $status->{$section} };
+
+            if( $remote{'timestamp'} > $hash{'timestamp'} ){
+                $report->{$section} = \%remote;
+                return $remote{'timestamp'};
+            }
+        } else {
+            return $hash{'timestamp'};
+        }
+    } else {
+        return 'error';
+    }
+}
+
 sub backup {
     my %hash     = @_;
     my $start    = time;
@@ -1003,6 +1103,21 @@ sub backup {
  
     # check last backup time
     $hash{'timestamp'} = $report->{$section}{'timestamp'};
+    my $latest = latest_timestamp( %hash );
+
+    if( $latest ){
+        if( $latest ne 'error' ){
+            $hash{'timestamp'} = $latest;
+        } else {
+            $hash{'status'} = "Failed to get status from cluster member $member_ip:$member_port";
+            logger($hash{'status'},$hash{'lvname'},'warning');
+
+            if( lc($member_err) eq 'abort' ){
+                $hash{'code'} = 2;
+                return %hash;
+            }
+        }
+    }
 
     if( $hash{'timestamp'} ){
         my @timenow = [gettimeofday];
@@ -1071,7 +1186,35 @@ sub backup {
 
                 return %hash;
         }}
-        
+
+        # verify volume is not
+        # locked by other cluster member
+        my $locked = is_locked_HTTP( %hash );
+
+        # retry on error
+        if( $locked eq 'error' ){
+            sleep 1;
+            $locked = is_locked_HTTP( %hash );
+        }
+
+        switch( $locked ){
+            case 'locked' { 
+                $hash{'code'} = 4;
+                $hash{'status'} = "Volume is locked by other instance";
+
+                logger($hash{'status'}, $hash{'lvname'}, 'warning');
+                return %hash;
+            }
+            case 'error' {
+                $hash{'status'} = "Remote cluster member is unreachable";
+                $hash{'code'} = 4;
+
+                if( lc($member_err) eq 'abort' ){
+                    $hash{'code'} = 2;
+                    return %hash;
+            }}
+        }
+
         # create lock file
         $lv_lock->write;
 
@@ -1094,8 +1237,7 @@ sub backup {
                 } else {
                     logger('Pre-backup script complete successfuly',$hash{'lvname'});
                 }
-            }
-        }
+        }}
 
         # create snapshot
         if( create_snapshot( $device, $hash{'lvname'} ) ne 0 ){
@@ -1149,6 +1291,9 @@ sub backup {
             # remove lock file
             $lv_lock->remove;
         } elsif( $dry_run ){
+            # rest a bit
+            sleep 5;
+
             $hash{'status'} = "Skipping backup. dry-run mode";
             $hash{'code'} = 4;
 
@@ -1199,7 +1344,9 @@ sub backup {
         my $backup = run_cmd "$cmd",
            '1>' => sub { push(@stdout, $_[0]) if $_[0]; },
            '2>' => sub { return if ! @_;
-                         logger("duplicity error trace: @_",$hash{'lvname'},'err'); },
+                         logger("duplicity error trace: @_",$hash{'lvname'},'err');
+                         `kill $backups{ $hash{'uid'} }{'pid'}`
+                            if $backups{ $hash{'uid'} }{'pid'}; },
            '$$' => \$backups{ $hash{'uid'} }{'pid'};
 
         # backup process finished
@@ -1282,19 +1429,21 @@ my $wdr = AE::timer $timer_drbd, $timer_drbd, sub {
     return if $check_drbd ne 'true';
 
     fork_call {
-        my @info = ();
+        my @return = ();
 
-        chomp($info[0] = `drbd-overview`);
-        chomp($info[1] = `drbdadm dump-xml`);
+        chomp(@drbd_view = `drbd-overview`);
+        chomp($drbd_dump = `drbdadm dump-xml`);
 
-        return @info;
+        $return[0] = \@drbd_view;
+        $return[1] = \$drbd_dump;
+        return @return;
     } sub {
         return if !$_[0];
         return if !$_[1];
 
         my $xml    = XML::Simple->new();
         $drbd_dump = $xml->XMLin($_[1]);
-        @drbd_view = $_[0];
+        @drbd_view = @{ $_[0] };
     };
 };
 
@@ -1322,8 +1471,14 @@ logger("Barch $version started");
 # create logical volumes watcher
 # every 30sec
 my $wlv = AE::timer 0, $timer_lvs, sub {
+    # verify cluster is online
+    check_cluster_status();
+
+    # wait for cluster
+    return if $cluster_status != 1;
+
     # handle graceful stop option
-    logger("STOPPING DAEMON. Wating for running backup(s) to finish")
+    logger("STOPPING. Wating for running backup(s) to finish")
         and return if -e $stop_file;
 
     fork_call {
@@ -1425,8 +1580,7 @@ my $wlv = AE::timer 0, $timer_lvs, sub {
             if( ! $lvs_queue{$uid} ){
                 delete $report->{$s}
                     if $report->{$s};
-            }
-        }
+        }}
     }
 };
 
@@ -1534,7 +1688,6 @@ sub sigHandler {
 
         # cleanup
         reverse_cleanup( %hash );
-
         logger("Backup terminated (SIG: @_)", $hash{'lvname'},'err');
     }
 
@@ -1568,13 +1721,12 @@ sub daemonize {
     my $pwd = shift;
 
     chdir $pwd or die "Can't chdir to $pwd: $!";
-    open STDIN, '/dev/null'    or die "Can't read /dev/null: $!";
-    open STDOUT, '>>/dev/null' or die "Can't write to /dev/null: $!";
-    open STDERR, '>>/dev/null' or die "Can't write to /dev/null: $!";
-
+    open STDIN, '/dev/null'    or die "Can't read from /dev/null: $!";
+    open STDOUT, '>>/dev/null' or die "Can't write to /dev/null: $!" ;
+    open STDERR, '>>/dev/null' or die "Can't write to /dev/null: $!" ;
     defined( my $pid = fork )  or die "Can't fork: $!";
-    exit if $pid;
 
+    exit if $pid;
     setsid or die "Can't start a new session: $!";
     umask 0;
 }
@@ -1611,7 +1763,6 @@ $httpd->register_service( sub {
             if( $backups{$q}{'drbd'}->{'dev'} ne 'undefined' ){
                 $drbddev = '[DRBD] ';
             }
-
             push @running, "${drbddev}$backups{$q}{'lvname'} $remsize";
         }
 
@@ -1650,6 +1801,21 @@ $httpd->register_service( sub {
         ];
     } elsif( $path eq '/backups' ){
         my $json = encode_json \%backups;
+        return [
+            200,
+            [ 'Content-type' => 'text/plain' ],
+            [ $json ],
+        ];
+    } elsif( $path eq '/status' ){
+        my %status = %{ $report };
+        my $json   = encode_json \%status;
+        return [
+            200,
+            [ 'Content-type' => 'text/plain' ],
+            [ $json ],
+        ];
+    } elsif( $path eq '/queue' ){
+        my $json = encode_json \%queue;
         return [
             200,
             [ 'Content-type' => 'text/plain' ],
