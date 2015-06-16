@@ -224,6 +224,7 @@ my $rem_snapdir = $conf->{duplicity}{remote_snap_dir};
 my $volsize     = $conf->{duplicity}{volsize}           || '25';
 my $srcmismatch = $conf->{duplicity}{source_mismatch}   || ''  ;
 my $trans_wait  = $conf->{duplicity}{maxtransfertime}   || '2H';
+my $exclude_all = $conf->{duplicity}{exclude}           || ''  ;
 
 # target server SSH credentials
 my $ssh_user    = $conf->{ssh}{user} || 'root';
@@ -259,6 +260,7 @@ my @lvs_array      = ();
 my %queue          = ();
 my @q_order        = ();
 my %fullreport     = ();
+my @exclude_always = ();
 
 ####################
 # Logging          #
@@ -353,7 +355,7 @@ if( $singleLV ){
 
 # display warning
 # if not binding on localhost
-logger("Binding on $bind_addr:$bind_port",'Main','warning')
+logger("Binding on $bind_addr:$bind_port",'Main')
     if( $bind_addr ne '127.0.0.1' );
 
 # validate cycle time
@@ -369,6 +371,16 @@ logger("[ERR] Invalid volume grace period (vol_grace)",'Main','err') and exit 2
 
 logger("[ERR] Invalid chunk transfer time (maxtransfertime)",'Main','err') and exit 2
     if $trans_wait eq 'invalid';
+
+# parse excluded directories
+if( $exclude_all ){
+    @exclude_always = split /\s*,\s*/, $exclude_all;
+    $exclude_all    = '';
+
+    foreach my $dir ( @exclude_always ){
+        $exclude_all .= " --exclude $dir";
+    }
+}
 
 ####################
 # daemonize        #
@@ -1326,6 +1338,17 @@ sub backup {
         $srcmismatch = '--allow-source-mismatch'
             if $srcmismatch eq 'allow';
 
+        # parse excluded directories
+        my $custom_disable = $custom->{$section}{'exclude'} || '';
+        if( $custom_disable ){
+            my @exclude = split /\s*,\s*/, $custom_disable;
+            $custom_disable    = '';
+
+            foreach my $dir ( @exclude ){
+                $custom_disable .= " --exclude $dir";
+            }
+        }
+
         # verbosity
         my $verbosity = "notice";
         $verbosity = "info" if $debug;
@@ -1334,7 +1357,8 @@ sub backup {
         # command arguments
         my $exc = "$duplicity --verbosity $verbosity $srcmismatch --volsize $volsize" .
                   " --num-retries $retries --encrypt-key=$encrypt_key" .
-                  " --full-if-older-than $full_backup $hash{'path'} $rem_snapdir/$instance/$hash{'lvname'}";
+                  " --full-if-older-than $full_backup $hash{'path'}"   . 
+                  "$exclude_all $custom_disable $rem_snapdir/$instance/$hash{'lvname'}";
         my $cmd = "$nice -n $cpu_nice $ionice -c2 -n${io_nice} $exc";
 
         # run duplicity
