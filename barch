@@ -1339,13 +1339,13 @@ sub backup {
             if $srcmismatch eq 'allow';
 
         # parse excluded directories
-        my $custom_disable = $custom->{$section}{'exclude'} || '';
-        if( $custom_disable ){
-            my @exclude = split /\s*,\s*/, $custom_disable;
-            $custom_disable    = '';
+        my $custom_exclude = $custom->{$section}{'exclude'} || '';
+        if( $custom_exclude ){
+            my @exclude = split /\s*,\s*/, $custom_exclude;
+            $custom_exclude    = '';
 
             foreach my $dir ( @exclude ){
-                $custom_disable .= " --exclude $dir";
+                $custom_exclude .= " --exclude $dir";
             }
         }
 
@@ -1358,7 +1358,7 @@ sub backup {
         my $exc = "$duplicity --verbosity $verbosity $srcmismatch --volsize $volsize" .
                   " --num-retries $retries --encrypt-key=$encrypt_key" .
                   " --full-if-older-than $full_backup $hash{'path'}"   . 
-                  "$exclude_all $custom_disable $rem_snapdir/$instance/$hash{'lvname'}";
+                  "$exclude_all $custom_exclude $rem_snapdir/$instance/$hash{'lvname'}";
         my $cmd = "$nice -n $cpu_nice $ionice -c2 -n${io_nice} $exc";
 
         # run duplicity
