@@ -224,7 +224,6 @@ my $rem_snapdir = $conf->{duplicity}{remote_snap_dir};
 my $volsize     = $conf->{duplicity}{volsize}           || '25';
 my $srcmismatch = $conf->{duplicity}{source_mismatch}   || ''  ;
 my $trans_wait  = $conf->{duplicity}{maxtransfertime}   || '2H';
-my $exclude_all = $conf->{duplicity}{exclude}           || ''  ;
 
 # target server SSH credentials
 my $ssh_user    = $conf->{ssh}{user} || 'root';
@@ -371,16 +370,6 @@ logger("[ERR] Invalid volume grace period (vol_grace)",'Main','err') and exit 2
 
 logger("[ERR] Invalid chunk transfer time (maxtransfertime)",'Main','err') and exit 2
     if $trans_wait eq 'invalid';
-
-# parse excluded directories
-if( $exclude_all ){
-    @exclude_always = split /\s*,\s*/, $exclude_all;
-    $exclude_all    = '';
-
-    foreach my $dir ( @exclude_always ){
-        $exclude_all .= " --exclude $dir";
-    }
-}
 
 ####################
 # daemonize        #
@@ -1342,10 +1331,10 @@ sub backup {
         my $custom_exclude = $custom->{$section}{'exclude'} || '';
         if( $custom_exclude ){
             my @exclude = split /\s*,\s*/, $custom_exclude;
-            $custom_exclude    = '';
+            $custom_exclude = '';
 
             foreach my $dir ( @exclude ){
-                $custom_exclude .= " --exclude $dir";
+                $custom_exclude .= " --exclude $hash{'path'}${dir}";
             }
         }
 
@@ -1358,7 +1347,7 @@ sub backup {
         my $exc = "$duplicity --verbosity $verbosity $srcmismatch --volsize $volsize" .
                   " --num-retries $retries --encrypt-key=$encrypt_key" .
                   " --full-if-older-than $full_backup $hash{'path'}"   . 
-                  "$exclude_all $custom_exclude $rem_snapdir/$instance/$hash{'lvname'}";
+                  "$custom_exclude $rem_snapdir/$instance/$hash{'lvname'}";
         my $cmd = "$nice -n $cpu_nice $ionice -c2 -n${io_nice} $exc";
 
         # run duplicity
