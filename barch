@@ -724,19 +724,31 @@ sub reverse_cleanup {
     }
 }
 
-sub create_remote_dir {
-    my $dir = shift;
-
-    # SSH connect to
-    # backup server
+sub connect_ssh_backupserv {
     my $openssh = Net::OpenSSH->new(
         $ssh_server, user => $ssh_user,
         master_opts => [ -o => "StrictHostKeyChecking=no" ]
     );
 
-    logger("Couldn't establish SSH connection to backup server $openssh->error",'Main','err')
+    logger("Couldn't establish SSH connection to backup server",'Main','err')
         and return 0
         if $openssh->error;
+
+    return $openssh;
+}
+
+sub check_ssh_connection {
+    my $openssh = connect_ssh_backupserv();
+
+    return 0 if ! $openssh;
+    return 1;
+}
+
+sub create_remote_dir {
+    my $dir     = shift;
+    my $openssh = connect_ssh_backupserv();
+
+    return 0 if ! $openssh;
 
     $openssh->system("mkdir -p $ssh_path/$instance/$dir")
         or logger("Failed to create remote directory on $ssh_server over SSH",'Main','err')
@@ -1023,6 +1035,10 @@ sub discover {
 
 sub is_locked_HTTP {
     my %hash = @_;
+
+    return 'not locked'
+        if( ! $member_ip && ! $member_port );
+
     my $ua   = LWP::UserAgent->new;
     my $resp = $ua->get("http://$member_ip:$member_port/backups");
 
@@ -1048,6 +1064,10 @@ sub is_locked_HTTP {
 sub latest_timestamp {
     my %hash    = @_;
     my $section = "$hash{'vgname'}.$hash{'lvname'}";
+
+    return $hash{'timestamp'}
+        if( ! $member_ip && ! $member_port );
+
     my $ua      = LWP::UserAgent->new;
     my $resp    = $ua->get("http://$member_ip:$member_port/status");
 
@@ -1324,7 +1344,8 @@ sub backup {
         $ENV{PASSPHRASE} = $encrypt_pass;
 
         # --allow-source-mismatch
-        $srcmismatch = '--allow-source-mismatch'
+        my $srcmismatch_flag = '';
+        $srcmismatch_flag = '--allow-source-mismatch'
             if $srcmismatch eq 'allow';
 
         # parse excluded directories
@@ -1344,7 +1365,7 @@ sub backup {
 
         # prepare duplicity
         # command arguments
-        my $exc = "$duplicity --verbosity $verbosity $srcmismatch --volsize $volsize" .
+        my $exc = "$duplicity --verbosity $verbosity $srcmismatch_flag --volsize $volsize" .
                   " --num-retries $retries --encrypt-key=$encrypt_key" .
                   " --full-if-older-than $full_backup $hash{'path'}"   . 
                   "$custom_exclude $rem_snapdir/$instance/$hash{'lvname'}";
@@ -1436,6 +1457,10 @@ sub backup {
 # start
 logger("Starting pre-backup procedures");
 
+# verify SSH credentials
+logger('Failed to connet backup server via SSH. Check credentials') and exit 2
+    if ! check_ssh_connection();
+
 # create DRBD watcher
 # every 10min
 my $wdr = AE::timer $timer_drbd, $timer_drbd, sub {
@@ -1484,11 +1509,14 @@ logger("Barch $version started");
 # create logical volumes watcher
 # every 30sec
 my $wlv = AE::timer 0, $timer_lvs, sub {
-    # verify cluster is online
-    check_cluster_status();
+    # Connect to Barch cluster
+    if( $member_ip && $member_port ){
+        # verify cluster is online
+        check_cluster_status();
 
-    # wait for cluster
-    return if $cluster_status != 1;
+        # wait for cluster
+        return if $cluster_status != 1;
+    }
 
     # handle graceful stop option
     logger("STOPPING. Wating for running backup(s) to finish")
@@ -1773,8 +1801,9 @@ $httpd->register_service( sub {
             my $remsize = $backups{$q}{'remsize'} || '';
             my $drbddev = '';
 
-            if( $backups{$q}{'drbd'}->{'dev'} ne 'undefined' ){
-                $drbddev = '[DRBD] ';
+            if( $backups{$q}{'drbd'}->{'dev'} ){
+                $drbddev = '[DRBD] '
+                    if $backups{$q}{'drbd'}->{'dev'} ne 'undefined';
             }
             push @running, "${drbddev}$backups{$q}{'lvname'} $remsize";
         }
