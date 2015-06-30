@@ -987,10 +987,8 @@ sub discover {
             }}
 
             # get mount flags
-            if( ! $mopt ){
-                logger("No mount opts specified. Using defaults",hash{'lvname'},'debug');
-                $mopt = fs_mount_flag($cfs);
-            }
+            $mopt = fs_mount_flag($cfs)
+                if ! $mopt;
 
             # mount filesystem
             `$mount -t $cfs $mopt $hash{'blkdev'} $path`;
