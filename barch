@@ -495,7 +495,7 @@ sub check_drbd_state {
     logger("DRBD configuration missing. Cannot identify DRBD device",$lvname,'err')
         if ! $drbd_dump->{'resource'};
 
-    foreach my $resurce ( keys $drbd_dump->{'resource'} ){
+    foreach my $resurce ( keys %{ $drbd_dump->{'resource'} } ){
         my $k = $drbd_dump->{'resource'}{$resurce}{'host'}{$localhost}{'volume'};
         my $d = $k->{'disk'};
 
