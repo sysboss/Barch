@@ -12,6 +12,8 @@
 use strict;
 use warnings;
 
+BEGIN { $ENV{'PERL_ANYEVENT_MODEL'} = 'Perl' }
+
 use JSON;
 use Switch;
 use AnyEvent;
@@ -1521,7 +1523,7 @@ my $wlv = AE::timer 0, $timer_lvs, sub {
         and return if -e $stop_file;
 
     fork_call {
-        chomp( my @cmd = `$lvs` );
+        chomp( my @cmd = `$lvs | grep -v $pref` );
         return @cmd;
     } sub {
         return if not @_;
