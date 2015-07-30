@@ -73,6 +73,7 @@ then
 
     cp -ax barch /etc/barch/
     cp -ax monitor.pl /etc/barch/
+    touch /var/cache/barch/status
 
     echo " done"
     echo -n "├ creating symbolic links..."
