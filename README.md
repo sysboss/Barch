@@ -6,19 +6,30 @@ An open source LVM backup utility for linux based systems.
 Barch conducts automatic and predefined volume structure recognition. Supports full/incremental backups. Based on duplicity.
 
 Key features:
- * Incremental backups
+ * Full/Incremental backups (rdiff)
+ * Encrypted
+ * Bandwidth-efficient
  * Parallel execution
- * HTTP web interface
+ * HTTP interface
  * DRBD clusters compatible
  * Syslog logging
  * Monitoring utility
 
-### Introduction - How it works? ###
-Barch conducts LVM incremental backups by discovering entire hierarchy of each logical volume such as partitions, filesystems etc.  
+## Introduction ##
+LVM provides a convenient snapshot feature. This allows you to create an identical clone of a logical volume and store only the blocks that differ from it.
 
-Before backup starts, Barch creates a snapshot of the target LV and mounts it to a temporary mount point. This allows the backup tool to sync changes (increments) between the last backup and the current state.  
+Barch is a robust automation daemon which provides LVM incremental backups, has an automatic recursive discovering algorithm to explore the entire hierarchy of each logical volume (such as partitions, filesystems etc).  
 
-Barch is written in Perl and depends on duplicity, rsync and kpartx. Please make sure this tools installed.
+## How it works? ##
+After Barch is configured, it runs through the following steps:
+  * Creates a temporary snapshot of the volume
+  * Barch discovers the volume structure (eg. internal partitions)
+  * Mounts the snapshot on a temporary directory
+  * Using duplicity to sync changes (increments) since the last backup
+  * Rotates the backups
+  * Unmounts and removes the snapshot
+
+Barch is an Open Source free product written in Perl and depends on duplicity, rsync and kpartx. Please make sure this tools installed.
 
 For more reference regarding duplicity, check: http://duplicity.nongnu.org/
 
