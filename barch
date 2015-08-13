@@ -21,7 +21,6 @@ use XML::Simple;
 use Time::Piece;
 use Net::OpenSSH;
 use Getopt::Long;
-use Config::Tiny;
 use LWP::UserAgent;
 use Twiggy::Server;
 use AnyEvent::Util;
@@ -116,47 +115,11 @@ GetOptions(
 ####################
 my $pwd  = '/etc/barch';
 my $pref = '_bsnap';
-my $conf = Config::Tiny->read("$pwd/barch.conf");
 
-sub check_config {
-    die "$pwd/barch.conf file not found"
-        if not -e "$pwd/barch.conf";
+my $config_reader = Barch::Config->new( configfile => "$pwd/barch.conf" );
+my $conf          = $config_reader->read;
 
-    # required sections
-    my @sections = ('default', 'global', 'snapshots', 'duplicity', 'advanced');
-    my $conf_ok  = 0;
-
-    foreach my $section (@sections){
-        if ( ! first { $section eq $_ } keys %{$conf} ){
-            print "$section section is missing.\nCheck you configuration file\n";
-            exit 2;
-        }}
-
-    foreach my $section ( keys %{$conf} ) {
-        foreach my $parameter ( keys %{ $conf->{$section} } ){
-            if(
-                $parameter =~ /[\@#\-%&\$*+()]/ ||
-                $conf->{$section}{$parameter} =~ /[#\-%&\$*+()]/
-            ){
-                print "[$section]\n";
-                print "\t$parameter = $conf->{$section}{$parameter}\n";
-                $conf_ok = 1;
-            }}
-    }
-
-    print "[WARN] Custom config file $conf->{advanced}{custom} not found\n"
-        if( $conf->{advanced}{custom} && !-e "$conf->{advanced}{custom}" );
-
-    if( $conf_ok != 0 ){
-        print "Config [ERROR]\n";
-        exit 2;
-    } else {
-        print "Config [OK]\n"
-            and exit 0 if $chconfig;
-    }
-
-    return 0;
-}
+$chconfig and exit 0;
 
 ####################
 # Special params   #
