@@ -15,7 +15,7 @@ use warnings;
 BEGIN { $ENV{'PERL_ANYEVENT_MODEL'} = 'Perl' }
 
 use JSON;
-use Switch;
+use Switch; ## no critic FIXME
 use AnyEvent;
 use XML::Simple;
 use Time::Piece;
@@ -411,8 +411,7 @@ sub check_cluster_status {
 
             foreach my $section ( keys %{ $status } ){
                 my %remote = %{ $status->{$section} };
-                my %local  = %{ $report->{$section} }
-                    if $report->{$section};
+                my %local  = $report->{$section} ? %{ $report->{$section} } : ();
 
                 # nothing to sync
                 next if ! %remote;
@@ -1706,9 +1705,9 @@ sub daemonize {
     my $pwd = shift;
 
     chdir $pwd or die "Can't chdir to $pwd: $!";
-    open STDIN, '/dev/null'    or die "Can't read from /dev/null: $!";
-    open STDOUT, '>>/dev/null' or die "Can't write to /dev/null: $!" ;
-    open STDERR, '>>/dev/null' or die "Can't write to /dev/null: $!" ;
+    open STDIN, '<', '/dev/null'    or die "Can't read from /dev/null: $!";
+    open STDOUT, '>>', '/dev/null' or die "Can't write to /dev/null: $!" ;
+    open STDERR, '>>', '/dev/null' or die "Can't write to /dev/null: $!" ;
     defined( my $pid = fork )  or die "Can't fork: $!";
 
     exit if $pid;
