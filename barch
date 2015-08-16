@@ -15,14 +15,12 @@ use warnings;
 BEGIN { $ENV{'PERL_ANYEVENT_MODEL'} = 'Perl' }
 
 use JSON;
-use Switch;
+use Switch; ## no critic FIXME
 use AnyEvent;
 use XML::Simple;
-use Sys::Syslog;
 use Time::Piece;
 use Net::OpenSSH;
 use Getopt::Long;
-use Config::Tiny;
 use LWP::UserAgent;
 use Twiggy::Server;
 use AnyEvent::Util;
@@ -33,6 +31,9 @@ use POSIX       'setsid';
 use List::Util  'first';
 use Digest::MD5 'md5_hex';
 use Time::HiRes 'gettimeofday';
+
+use Barch::Logger;
+use Barch::Monitor::HTTP;
 
 my $version = "6.1";
 my $welcome = "Barch v$version - LVM Backup Solution";
@@ -115,47 +116,11 @@ GetOptions(
 ####################
 my $pwd  = '/etc/barch';
 my $pref = '_bsnap';
-my $conf = Config::Tiny->read("$pwd/barch.conf");
 
-sub check_config {
-    die "$pwd/barch.conf file not found"
-        if not -e "$pwd/barch.conf";
+my $config_reader = Barch::Config->new( configfile => "$pwd/barch.conf" );
+my $conf          = $config_reader->read;
 
-    # required sections
-    my @sections = ('default', 'global', 'snapshots', 'duplicity', 'advanced');
-    my $conf_ok  = 0;
-
-    foreach my $section (@sections){
-        if ( ! first { $section eq $_ } keys %{$conf} ){
-            print "$section section is missing.\nCheck you configuration file\n";
-            exit 2;
-        }}
-
-    foreach my $section ( keys %{$conf} ) {
-        foreach my $parameter ( keys %{ $conf->{$section} } ){
-            if(
-                $parameter =~ /[\@#\-%&\$*+()]/ ||
-                $conf->{$section}{$parameter} =~ /[#\-%&\$*+()]/
-            ){
-                print "[$section]\n";
-                print "\t$parameter = $conf->{$section}{$parameter}\n";
-                $conf_ok = 1;
-            }}
-    }
-
-    print "[WARN] Custom config file $conf->{advanced}{custom} not found\n"
-        if( $conf->{advanced}{custom} && !-e "$conf->{advanced}{custom}" );
-
-    if( $conf_ok != 0 ){
-        print "Config [ERROR]\n";
-        exit 2;
-    } else {
-        print "Config [OK]\n"
-            and exit 0 if $chconfig;
-    }
-
-    return 0;
-}
+$chconfig and exit 0;
 
 ####################
 # Special params   #
@@ -239,6 +204,12 @@ my $drbd_dump   = ();
 
 chomp( my $localhost = `hostname` );
 
+my $logger = Barch::Logger->new(
+    debug        => $debug,
+    verbose      => $verbose,
+    log_facility => $logfacility,
+);
+
 ####################
 # Variables        #
 ####################
@@ -263,39 +234,12 @@ my @q_order        = ();
 my %fullreport     = ();
 my @exclude_always = ();
 
-####################
-# Logging          #
-####################
-# Initialize logging
-sub logger {
-    my( $msg, $ident, $priority ) = @_;
-
-    # defaults
-    $priority = $priority || "info";
-    $ident = $ident || 'Main';
-    $ident = "Barch-$ident";
-
-    return if !$msg;
-    return if( $priority eq 'debug' && !$debug );
-
-    $msg = "[$ident] [" . uc($priority) . "] $msg";
-
-    # start log
-    openlog $ident, "pid,cons", $logfacility;
-
-    # write to log
-    syslog( $priority, $msg );
-    print "$msg\n" if $verbose;
-
-    closelog();
-}
-
 sub exit_fatal {
     my( $msg, $ident ) = @_;
     $ident = 'Main' if !$ident;
 
     # write log
-    logger("FATAL: $msg",$ident,'crit') if $msg;
+    $logger->log("FATAL: $msg",$ident,'crit') if $msg;
 
     # cleanup
     cleanup() and exit 2;
@@ -342,7 +286,7 @@ if( $cleanup ){
 
 if( $graceful ){
     `touch $stop_file $silent`;
-    logger('Daemon shutdown scheduled immediately after ' . 
+    $logger->log('Daemon shutdown scheduled immediately after ' . 
            'currently running backups completion');
     exit;
 }
@@ -356,7 +300,7 @@ if( $singleLV ){
 
 # display warning
 # if not binding on localhost
-logger("Binding on $bind_addr:$bind_port",'Main')
+$logger->log("Binding on $bind_addr:$bind_port",'Main')
     if( $bind_addr ne '127.0.0.1' );
 
 # validate cycle time
@@ -364,13 +308,13 @@ $vol_cycle  = parse_period($vol_cycle);
 $vol_grace  = parse_period($vol_grace);
 $trans_wait = parse_period($trans_wait);
 
-logger("[ERR] Invalid volume backup cycle (vol_cycle)",'Main','err') and exit 2
+$logger->log("[ERR] Invalid volume backup cycle (vol_cycle)",'Main','err') and exit 2
     if $vol_cycle eq 'invalid';
 
-logger("[ERR] Invalid volume grace period (vol_grace)",'Main','err') and exit 2
+$logger->log("[ERR] Invalid volume grace period (vol_grace)",'Main','err') and exit 2
     if $vol_grace eq 'invalid';
 
-logger("[ERR] Invalid chunk transfer time (maxtransfertime)",'Main','err') and exit 2
+$logger->log("[ERR] Invalid chunk transfer time (maxtransfertime)",'Main','err') and exit 2
     if $trans_wait eq 'invalid';
 
 ####################
@@ -458,7 +402,7 @@ sub check_cluster_status {
         my( $body, $hdr ) = @_;
 
         if( $hdr->{Status} =~ /^2/ ){
-            logger("Successfuly connected to cluster member $member_ip:$member_port")
+            $logger->log("Successfuly connected to cluster member $member_ip:$member_port")
                 if $cluster_status != 1;
             $cluster_status = 1;
 
@@ -467,8 +411,7 @@ sub check_cluster_status {
 
             foreach my $section ( keys %{ $status } ){
                 my %remote = %{ $status->{$section} };
-                my %local  = %{ $report->{$section} }
-                    if $report->{$section};
+                my %local  = $report->{$section} ? %{ $report->{$section} } : ();
 
                 # nothing to sync
                 next if ! %remote;
@@ -482,7 +425,7 @@ sub check_cluster_status {
                 }
             }
         } else {
-            logger("Waiting for cluster member $member_ip:$member_port");
+            $logger->log("Waiting for cluster member $member_ip:$member_port");
             $cluster_status = 0;
         }
     };
@@ -494,7 +437,7 @@ sub check_drbd_state {
     my $drbd_dev  = '';
     my $drbd_disk = '';
 
-    logger("DRBD configuration missing. Cannot identify DRBD device",$lvname,'err')
+    $logger->log("DRBD configuration missing. Cannot identify DRBD device",$lvname,'err')
         if ! $drbd_dump->{'resource'};
 
     foreach my $resurce ( keys %{ $drbd_dump->{'resource'} } ){
@@ -588,7 +531,7 @@ sub queue_backup {
         # is late for next scheduled cycle
         if( $queue{ $hash{'uid'} } && ! $backups{ $hash{'uid'} } ){
             if( not $queue{ $hash{'uid'} }{'acknowledged'} ){
-                logger("$hash{'lvname'} is in queue since previous cycle",$hash{'lvname'},'alert');
+                $logger->log("$hash{'lvname'} is in queue since previous cycle",$hash{'lvname'},'alert');
 
                 $queue{ $hash{'uid'} }{'acknowledged'} = 1;
                 $queue{ $hash{'uid'} }{'late'} = $passed;
@@ -637,7 +580,7 @@ sub fs_type {
     my $dev  = $hash{'blkdev'};
 
     # custom specifications
-    logger("$hash{'lvname'} has custom definitions", $hash{'lvname'})
+    $logger->log("$hash{'lvname'} has custom definitions", $hash{'lvname'})
         and return 'custom'
         if is_custom($hash{'vgname'}, $hash{'lvname'});
 
@@ -650,7 +593,7 @@ sub fs_type {
         return $1;
     }
 
-    logger("Failed to recognize file system on $dev", $hash{'lvname'},'err');
+    $logger->log("Failed to recognize file system on $dev", $hash{'lvname'},'err');
     return 'unknown';
 }
 
@@ -681,7 +624,7 @@ sub cleanup {
     # remove snapshots
     chomp( my @snaps = `$lvs | grep $pref` );
 
-    logger("No snapshots to remove") and exit 0
+    $logger->log("No snapshots to remove") and exit 0
         if not @snaps;
 
     foreach my $snap ( @snaps ){
@@ -698,9 +641,9 @@ sub cleanup {
             if $mount_dir ne '/';
 
         if( remove_snapshot("/dev/$hash{'vgname'}/$hash{'lvname'}") eq 0 ){
-            logger("$hash{'lvname'} - snapshot removed");
+            $logger->log("$hash{'lvname'} - snapshot removed");
         } else {
-            logger("$hash{'lvname'} - failed to remove snapshot",'Main','err');
+            $logger->log("$hash{'lvname'} - failed to remove snapshot",'Main','err');
         }
     }
 
@@ -717,10 +660,10 @@ sub reverse_cleanup {
 
             # action failed
             # retry in a second
-            logger("Cleanup action failed: $action", $hash{'lvname'},'err')
+            $logger->log("Cleanup action failed: $action", $hash{'lvname'},'err')
                 if system($action) ne 0;
         } else {
-            logger("Cleanup: $action", $hash{'lvname'},'debug');
+            $logger->log("Cleanup: $action", $hash{'lvname'},'debug');
         }
         sleep 1;
     }
@@ -732,7 +675,7 @@ sub connect_ssh_backupserv {
         master_opts => [ -o => "StrictHostKeyChecking=no" ]
     );
 
-    logger("Couldn't establish SSH connection to backup server",'Main','err')
+    $logger->log("Couldn't establish SSH connection to backup server",'Main','err')
         and return 0
         if $openssh->error;
 
@@ -753,7 +696,7 @@ sub create_remote_dir {
     return 0 if ! $openssh;
 
     $openssh->system("mkdir -p $ssh_path/$instance/$dir")
-        or logger("Failed to create remote directory on $ssh_server over SSH",'Main','err')
+        or $logger->log("Failed to create remote directory on $ssh_server over SSH",'Main','err')
         and return 0;
 
     return 1;
@@ -801,7 +744,7 @@ sub discover {
         $hash{'status'} = "Block device $hash{'blkdev'} doesn't exist. Skip.";
         $hash{'code'} = 2;
 
-        logger($hash{'status'}, $hash{'lvname'},'warning');
+        $logger->log($hash{'status'}, $hash{'lvname'},'warning');
         return %hash;
     }
 
@@ -831,7 +774,7 @@ sub discover {
 
     # return on exception
     if( $hash{'code'} ){
-        logger($hash{'status'}, $hash{'lvname'},'warning');
+        $logger->log($hash{'status'}, $hash{'lvname'},'warning');
         return %hash;
     }
 
@@ -849,10 +792,10 @@ sub discover {
             $hash{'status'} = "Failed to mount $hash{'blkdev'} on $path";
             $hash{'code'} = 2;
 
-            logger($hash{'status'}, $hash{'lvname'},'err');
+            $logger->log($hash{'status'}, $hash{'lvname'},'err');
             return %hash;
         } else {
-            logger("Mount $hash{'blkdev'} on $path (opts: $mount_opts)",$hash{'lvname'},'debug');
+            $logger->log("Mount $hash{'blkdev'} on $path (opts: $mount_opts)",$hash{'lvname'},'debug');
             push(@{ $hash{cleanup} }, "$umount $path");
         }
 
@@ -863,7 +806,7 @@ sub discover {
     }
     # handle partition table
     elsif( $hash{'fstype'} eq 'partition' ){
-        logger("$hash{'blkdev'} contains partition table",$hash{'lvname'},'debug');
+        $logger->log("$hash{'blkdev'} contains partition table",$hash{'lvname'},'debug');
 
         # get partitions
         chomp( my @partition = `$kpartx -l $hash{'blkdev'} | awk '{print \$1}'` );
@@ -872,13 +815,13 @@ sub discover {
             $hash{'status'} = "Failed to map partitions on $hash{'blkdev'}";
             $hash{'code'} = 2;
 
-            logger($hash{'status'}, $hash{'lvname'},'err');
+            $logger->log($hash{'status'}, $hash{'lvname'},'err');
             return %hash;
         } else {
             my %data = %hash;
 
             foreach my $part (@partition){
-                logger("Partition found: $part",$hash{'lvname'},'debug');
+                $logger->log("Partition found: $part",$hash{'lvname'},'debug');
                 push(@{ $hash{hierarchy} }, "partition");
 
                 $data{'path'}   = "$hash{'path'}/$part";
@@ -894,7 +837,7 @@ sub discover {
                     $hash{'status'} = "One or more partition recognition failed";
                     $hash{'code'} = 2;
 
-                    logger($hash{'status'}, $hash{'lvname'},'err');
+                    $logger->log($hash{'status'}, $hash{'lvname'},'err');
                     return %hash;
             }}
 
@@ -906,7 +849,7 @@ sub discover {
     # LVM2
     elsif( $hash{'fstype'} eq 'lvm2' ){
         push(@{ $hash{hierarchy} }, "LVM");
-        logger("$hash{'blkdev'} contains LVM",$hash{'lvname'},'debug');
+        $logger->log("$hash{'blkdev'} contains LVM",$hash{'lvname'},'debug');
 
         # discover VG name(s)
         chomp(my @VG = `pvdisplay $hash{'blkdev'} | grep -i "vg name" | awk '{print \$NF}'`);
@@ -920,7 +863,7 @@ sub discover {
                 $hash{'status'} = "vgchange failed to activate $inVG";
                 $hash{'code'} = 2;
 
-                logger($hash{'status'}, $hash{'lvname'},'err');
+                $logger->log($hash{'status'}, $hash{'lvname'},'err');
             }
 
             sleep 0.2;
@@ -951,7 +894,7 @@ sub discover {
                     $hash{'status'} = "One or more Logical Volumes in data{'vgname'} recognition failed";
                     $hash{'code'} = 2;
 
-                    logger($hash{'status'}, $hash{'lvname'},'err');
+                    $logger->log($hash{'status'}, $hash{'lvname'},'err');
                     return %hash;
         }}}
 
@@ -964,7 +907,7 @@ sub discover {
     # custom
     elsif( $hash{'fstype'} eq 'custom' ){
         if( ! $custom->{$section}{backup} ){
-            logger('Custom config backup flag is missing',$hash{'lvname'},'warning');
+            $logger->log('Custom config backup flag is missing',$hash{'lvname'},'warning');
 
             $hash{'status'} = 'Custom config error';
             $hash{'code'} = 1;
@@ -982,7 +925,7 @@ sub discover {
                 `$pre_m` if $pre_m ne 'none';
 
                 if( $? ne 0 ){
-                    logger("Pre-mount script failed (exit code $?)",$hash{'lvname'},'err');
+                    $logger->log("Pre-mount script failed (exit code $?)",$hash{'lvname'},'err');
                     $hash{'status'} = 'Pre-mount script failed';
                     $hash{'code'} = 2;
                     return %hash;
@@ -999,10 +942,10 @@ sub discover {
                 $hash{'status'} = "Failed to mount $hash{'blkdev'} on $path";
                 $hash{'code'} = 2;
 
-                logger($hash{'status'}, $hash{'lvname'},'err');
+                $logger->log($hash{'status'}, $hash{'lvname'},'err');
                 return %hash;
             } else {
-                logger("Mount $hash{'blkdev'} on $path (opts: $mopt)",$hash{'lvname'},'debug');
+                $logger->log("Mount $hash{'blkdev'} on $path (opts: $mopt)",$hash{'lvname'},'debug');
                 push(@{ $hash{cleanup} }, "$umount $path");
 
                 if( $post_m ){
@@ -1019,7 +962,7 @@ sub discover {
             $hash{'status'} = "$hash{'lvname'} backup is disabled by custom.conf. skip.";
             $hash{'code'} = 4;
 
-            logger($hash{'status'},$hash{'lvname'});
+            $logger->log($hash{'status'},$hash{'lvname'});
             return %hash;
         }
     }
@@ -1028,7 +971,7 @@ sub discover {
         $hash{'status'} = "Failed to recognize file system on $hash{'blkdev'}";
         $hash{'code'} = 2;
 
-        logger($hash{'status'}, $hash{'lvname'},'err');
+        $logger->log($hash{'status'}, $hash{'lvname'},'err');
         return %hash;
     }
 }
@@ -1054,7 +997,7 @@ sub is_locked_HTTP {
             );
         }
     } else {
-        logger("Cluster member $member_ip:$member_port is unreachable",$hash{'lvname'},'warning');
+        $logger->log("Cluster member $member_ip:$member_port is unreachable",$hash{'lvname'},'warning');
         return 'error';
     }
 
@@ -1113,13 +1056,13 @@ sub backup {
     # skip if volume is disabled
     # in custom.conf file
     if( is_disabled_volume( $hash{'vgname'}, $hash{'lvname'} ) ){
-        logger("$hash{'lvname'} backup is disabled in custom.conf");
+        $logger->log("$hash{'lvname'} backup is disabled in custom.conf");
         return;
     }
 
     # verify other instance
     # not running
-    logger("Volume is locked by other instance", $hash{'lvname'}, 'alert') and return
+    $logger->log("Volume is locked by other instance", $hash{'lvname'}, 'alert') and return
         if -e "$lock_dir/$hash{'lvname'}.lock";
  
     # check last backup time
@@ -1131,7 +1074,7 @@ sub backup {
             $hash{'timestamp'} = $latest;
         } else {
             $hash{'status'} = "Failed to get status from cluster member $member_ip:$member_port";
-            logger($hash{'status'},$hash{'lvname'},'warning');
+            $logger->log($hash{'status'},$hash{'lvname'},'warning');
 
             if( lc($member_err) eq 'abort' ){
                 $hash{'code'} = 2;
@@ -1145,7 +1088,7 @@ sub backup {
         my $passed  = $timenow[0][0] - $hash{'timestamp'};
 
         if( $passed < $vol_cycle ){
-            logger("$hash{'lvname'} was backed up $passed sec ago. Skip.");
+            $logger->log("$hash{'lvname'} was backed up $passed sec ago. Skip.");
             return;
         }
     }
@@ -1160,7 +1103,7 @@ sub backup {
             if( lc($drbd_state) ne 'any' &&
                 lc($drbd_state) ne lc( $hash{'drbd'}->{'state'} )
             ){
-                logger("DRBD device state: $hash{'drbd'}->{'state'}, skip",
+                $logger->log("DRBD device state: $hash{'drbd'}->{'state'}, skip",
                        $hash{'lvname'},'warning' );
                 return;
             }
@@ -1169,7 +1112,7 @@ sub backup {
             if( lc($drbd_conn) ne 'any' &&
                 lc($drbd_conn) ne lc( $hash{'drbd'}->{'conn'} )
             ){
-                logger("DRBD device state: $hash{'drbd'}->{'conn'}, skip",
+                $logger->log("DRBD device state: $hash{'drbd'}->{'conn'}, skip",
                        $hash{'lvname'}, 'warning' );
                 return;
             }
@@ -1178,15 +1121,15 @@ sub backup {
             if( lc($drbd_status) ne 'any' &&
                 lc($drbd_status) ne lc( $hash{'drbd'}->{'status'} )
             ){
-                logger("DRBD device state: $hash{'drbd'}->{'status'}, skip",
+                $logger->log("DRBD device state: $hash{'drbd'}->{'status'}, skip",
                        $hash{'lvname'},'warning' );
                 return;
             }
 
-            logger("DRBD detected (state: ".$hash{'drbd'}->{'state'}.", conn: ".$hash{'drbd'}->{'conn'}.", ".
+            $logger->log("DRBD detected (state: ".$hash{'drbd'}->{'state'}.", conn: ".$hash{'drbd'}->{'conn'}.", ".
                    "status: ".$hash{'drbd'}->{'status'}.")", $hash{'lvname'}, 'debug');
         } else {
-            logger("No DRBD device found", $hash{'lvname'}, 'debug');
+            $logger->log("No DRBD device found", $hash{'lvname'}, 'debug');
         }
     }
 
@@ -1199,7 +1142,7 @@ sub backup {
         # apparently, a new volume
         if( not $hash{'timestamp'} ){
             if( volume_grace_period( $device ) ){
-                logger("Volume was never backed up. ".
+                $logger->log("Volume was never backed up. ".
                    "Delaying for grace period", $hash{'lvname'}, 'alert');
 
                 $hash{'code'} = 4;
@@ -1223,7 +1166,7 @@ sub backup {
                 $hash{'code'} = 4;
                 $hash{'status'} = "Volume is locked by other instance";
 
-                logger($hash{'status'}, $hash{'lvname'}, 'warning');
+                $logger->log($hash{'status'}, $hash{'lvname'}, 'warning');
                 return %hash;
             }
             case 'error' {
@@ -1244,7 +1187,7 @@ sub backup {
             my $script = $custom->{$section}{'pre_backup'} || '';
 
             if( $script ne 'none' ){
-                logger('Running pre-backup script', $hash{'lvname'});
+                $logger->log('Running pre-backup script', $hash{'lvname'});
 
                 # run it
                 `$script`;
@@ -1253,10 +1196,10 @@ sub backup {
                     $hash{'status'} = "Pre-backup script failed to run (exit code: $?)";
                     $hash{'code'} = 2;
 
-                    logger($hash{'status'}, $hash{'lvname'}, 'err');
+                    $logger->log($hash{'status'}, $hash{'lvname'}, 'err');
                     return %hash;
                 } else {
-                    logger('Pre-backup script complete successfuly',$hash{'lvname'});
+                    $logger->log('Pre-backup script complete successfuly',$hash{'lvname'});
                 }
         }}
 
@@ -1265,10 +1208,10 @@ sub backup {
             $hash{'code'} = 2;
             $hash{'status'} = "Failed to create snapshot. Aborting.";
 
-            logger($hash{'status'},$hash{'lvname'},'err');
+            $logger->log($hash{'status'},$hash{'lvname'},'err');
             return %hash;
         } else {
-            logger("Snapshot $hash{'lvname'}${pref} created", $hash{'lvname'});
+            $logger->log("Snapshot $hash{'lvname'}${pref} created", $hash{'lvname'});
         }
 
         # change device to snapshot
@@ -1305,7 +1248,7 @@ sub backup {
 
         # cleanup on error
         if( $hash{'code'} ne 0 ){
-            logger("Structure auto discover failed: $hash{'status'}", $hash{'lvname'},'err');
+            $logger->log("Structure auto discover failed: $hash{'status'}", $hash{'lvname'},'err');
             reverse_cleanup( %hash );
             report( %hash );
 
@@ -1318,7 +1261,7 @@ sub backup {
             $hash{'status'} = "Skipping backup. dry-run mode";
             $hash{'code'} = 4;
 
-            logger($hash{'status'});
+            $logger->log($hash{'status'});
             reverse_cleanup( %hash );
             report( %hash );
 
@@ -1337,7 +1280,7 @@ sub backup {
         delete $backups{ $hash{'uid'} } and return
            if !@_ or $hash{'code'} ne 0;
 
-        logger('Starting backup...',$hash{'lvname'});
+        $logger->log('Starting backup...',$hash{'lvname'});
         $backups{ $hash{'uid'} } = \%hash;
 
         # export env
@@ -1372,13 +1315,13 @@ sub backup {
         my $cmd = "$nice -n $cpu_nice $ionice -c2 -n${io_nice} $exc";
 
         # run duplicity
-        logger("duplicity: $cmd",$hash{'lvname'},'debug');
+        $logger->log("duplicity: $cmd",$hash{'lvname'},'debug');
 
         my @stdout  = "";
         my $backup = run_cmd "$cmd",
            '1>' => sub { push(@stdout, $_[0]) if $_[0]; },
            '2>' => sub { return if ! @_;
-                         logger("duplicity error trace: @_",$hash{'lvname'},'err');
+                         $logger->log("duplicity error trace: @_",$hash{'lvname'},'err');
                          `kill $backups{ $hash{'uid'} }{'pid'}`
                             if $backups{ $hash{'uid'} }{'pid'}; },
            '$$' => \$backups{ $hash{'uid'} }{'pid'};
@@ -1390,12 +1333,12 @@ sub backup {
                 $hash{'status'} = "Duplicity backup failed";
                 $hash{'code'} = 2;
 
-                logger($hash{'status'}, $hash{'lvname'},'err');
+                $logger->log($hash{'status'}, $hash{'lvname'},'err');
             } else {
                 $hash{'status'} = "Success";
                 $hash{'code'} = 0;
 
-                logger("Duplicity backup succeeded", $hash{'lvname'});
+                $logger->log("Duplicity backup succeeded", $hash{'lvname'});
             }
 
             # cleanup
@@ -1407,20 +1350,20 @@ sub backup {
                 my $exc = `$duplicity cleanup --force --extra-clean $rem_snapdir/$instance/$hash{'lvname'}`;
 
                 if( $? ne 0 ){
-                    logger("Cache cleanup failed", $hash{'lvname'},'warning');
-                    logger("duplicity: $exc",$hash{'lvname'},'debug');
+                    $logger->log("Cache cleanup failed", $hash{'lvname'},'warning');
+                    $logger->log("duplicity: $exc",$hash{'lvname'},'debug');
                 } else {
-                    logger("Cache cleaned up", $hash{'lvname'},'debug');
+                    $logger->log("Cache cleaned up", $hash{'lvname'},'debug');
                 }
 
                 # rotate backups
                 $exc = `$duplicity remove-older-than $keep_last --force $rem_snapdir/$instance/$hash{'lvname'}`;
 
                 if( $? ne 0 ){
-                    logger('Older backups deletion process failed',$hash{'lvname'},'err');
-                    logger("duplicity: $exc",$hash{'lvname'},'debug');
+                    $logger->log('Older backups deletion process failed',$hash{'lvname'},'err');
+                    $logger->log("duplicity: $exc",$hash{'lvname'},'debug');
                 } else {
-                    logger("Deleting backups older than $keep_last",$hash{'lvname'});
+                    $logger->log("Deleting backups older than $keep_last",$hash{'lvname'});
                 }
 
                 # wait to be sure that
@@ -1455,10 +1398,10 @@ sub backup {
 # Pre-backup       #
 ####################
 # start
-logger("Starting pre-backup procedures");
+$logger->log("Starting pre-backup procedures");
 
 # verify SSH credentials
-logger('Failed to connet backup server via SSH. Check credentials') and exit 2
+$logger->log('Failed to connet backup server via SSH. Check credentials') and exit 2
     if ! check_ssh_connection();
 
 # create DRBD watcher
@@ -1504,7 +1447,7 @@ clear_duplicity_locks();
 ####################
 # Start backup     #
 ####################
-logger("Barch $version started");
+$logger->log("Barch $version started");
 
 # create logical volumes watcher
 # every 30sec
@@ -1519,7 +1462,7 @@ my $wlv = AE::timer 0, $timer_lvs, sub {
     }
 
     # handle graceful stop option
-    logger("STOPPING. Wating for running backup(s) to finish")
+    $logger->log("STOPPING. Wating for running backup(s) to finish")
         and return if -e $stop_file;
 
     fork_call {
@@ -1565,13 +1508,13 @@ my $wlv = AE::timer 0, $timer_lvs, sub {
                     next if not $PID;
 
                     # abort backup
-                    logger("$hash{'lvname'} snapshot is running out of space. ".
+                    $logger->log("$hash{'lvname'} snapshot is running out of space. ".
                            "Aborting backup", $origlv,'warning');
                     
                     # kill duplicity process
                     `kill $PID`;
 
-                    logger("Backup terminated (PID: $PID)", $origlv,'err');
+                    $logger->log("Backup terminated (PID: $PID)", $origlv,'err');
                 }
             # handle volumes
             } else {
@@ -1591,7 +1534,7 @@ my $wlv = AE::timer 0, $timer_lvs, sub {
 
         # warn if no volumes
         # to backup
-        logger('No logical volumes found','Main','warning')
+        $logger->log('No logical volumes found','Main','warning')
             if not %lvs_queue;
 
         # unexpected error
@@ -1607,7 +1550,7 @@ my $wlv = AE::timer 0, $timer_lvs, sub {
             my $vgname  = $queue{ $vol_id }{'vgname'};
             my $section = "$vgname.$lvname";
 
-            logger("$lvname volume no longer exist. Removing from queue",$lvname,'debug');
+            $logger->log("$lvname volume no longer exist. Removing from queue",$lvname,'debug');
             unqueue_by_id($vol_id);
 
             # remove from status file
@@ -1662,7 +1605,7 @@ my $wqueue = AE::timer 5, 1, sub {
                     return if ! $1 || !$2;
 
                     if( $backups{$volume}{'remsize'} ){
-                        logger("No data transfered to backup server during the last ".
+                        $logger->log("No data transfered to backup server during the last ".
                                convert_time($trans_wait), $hash{'lvname'}, 'warning' )
                         if $backups{$volume}{'remsize'} eq "$1$2";
                     } else {
@@ -1709,7 +1652,7 @@ my $wconf = AE::timer 60, 60, sub {
 # every 10sec
 my $wreport = AE::timer 5, 10, sub {
     $report->write($reportfile)
-        or logger("Failed to write report file",'Main','err')
+        or $logger->log("Failed to write report file",'Main','err')
         if not $dry_run;
 };
 
@@ -1729,7 +1672,7 @@ sub sigHandler {
 
         # cleanup
         reverse_cleanup( %hash );
-        logger("Backup terminated (SIG: @_)", $hash{'lvname'},'err');
+        $logger->log("Backup terminated (SIG: @_)", $hash{'lvname'},'err');
     }
 
     # remove stop file
@@ -1746,12 +1689,12 @@ sub sigHandler {
     # verify all snapshots removed
     chomp( my @snaps = `$lvs | grep $pref` );
 
-    logger("Barch failed to remove one or more snapshot(s)",'Main','crit')
+    $logger->log("Barch failed to remove one or more snapshot(s)",'Main','crit')
         if @snaps;
 
     # write report file
     $report->write($reportfile)
-        or logger("Failed to write report file",'Main','err')
+        or $logger->log("Failed to write report file",'Main','err')
         if not $dry_run;
 
     sleep 0.8;
@@ -1762,9 +1705,9 @@ sub daemonize {
     my $pwd = shift;
 
     chdir $pwd or die "Can't chdir to $pwd: $!";
-    open STDIN, '/dev/null'    or die "Can't read from /dev/null: $!";
-    open STDOUT, '>>/dev/null' or die "Can't write to /dev/null: $!" ;
-    open STDERR, '>>/dev/null' or die "Can't write to /dev/null: $!" ;
+    open STDIN, '<', '/dev/null'    or die "Can't read from /dev/null: $!";
+    open STDOUT, '>>', '/dev/null' or die "Can't write to /dev/null: $!" ;
+    open STDERR, '>>', '/dev/null' or die "Can't write to /dev/null: $!" ;
     defined( my $pid = fork )  or die "Can't fork: $!";
 
     exit if $pid;
@@ -1772,105 +1715,18 @@ sub daemonize {
     umask 0;
 }
 
-# Start HTTP server
-my $httpd = Twiggy::Server->new(
-    host => $bind_addr,
-    port => $bind_port,
+my $http_monitor = Barch::Monitor::HTTP->new(
+    bind_addr => $bind_addr,
+    bind_port => $bind_port,
+    backups   => \%backups,
+    max_forks => $max_forks,
+    q_order   => \@q_order,
+    queue     => \%queue,
+    lvs_array => \@lvs_array,
+    report    => $report,
 );
 
-$httpd->register_service( sub {
-    my $env  = shift;
-    my $path = $env->{'PATH_INFO'} || '/';
-    my $time = time;
-
-    if( $path eq '/queue' ){
-        my $forks   = scalar keys %backups;
-        my $index   = 0 ;
-        my @running = ();
-        my @jobs    = ();
-        my $is_late = '';
-
-        # generate response
-        my $page = "| LV" . " "x25 .
-                   "| Since Last backup" . " "x2 .
-                   "| Queue" . " "x25 .
-                   "| Running ($forks/$max_forks forks):\n".
-                   "="x117 . "\n";
-
-        foreach my $q ( keys %backups ){
-            my $remsize = $backups{$q}{'remsize'} || '';
-            my $drbddev = '';
-
-            if( $backups{$q}{'drbd'}->{'dev'} ){
-                $drbddev = '[DRBD] '
-                    if $backups{$q}{'drbd'}->{'dev'} ne 'undefined';
-            }
-            push @running, "${drbddev}$backups{$q}{'lvname'} $remsize";
-        }
-
-        foreach my $j ( @q_order ){
-            $is_late = '[!]' if $queue{$j}{'late'};
-            push @jobs, "$queue{$j}{'lvname'} $is_late";
-        }
-
-        foreach my $lv ( @lvs_array ){
-            my $date     = '';
-            my $runqueue = '|' . ' 'x30;
-            my $queuejob = '|' . ' 'x30;
-            my @section  = @{ $lv };
-
-            $runqueue = "├ $running[$index]"
-                if defined $running[$index];
-
-            $queuejob = sprintf("|%2.0f├ %-26s", ($index+1), $jobs[$index])
-                if defined $jobs[$index];
-
-            if( $report->{"$section[0].$section[1]"}{timestamp} ){
-                $date = $report->{"$section[0].$section[1]"}{timestamp};
-                $date = convert_time( $time - $date );
-            }
-
-            $date  = $date || '-';
-            $page .= sprintf("├ %-26s | %-18s $queuejob $runqueue\n",
-                $section[1], $date );
-            $index++;
-        }
-
-        return [
-            200,
-            [ 'Content-type' => 'text/plain' ],
-            [ $page ],
-        ];
-    } elsif( $path eq '/backups' ){
-        my $json = encode_json \%backups;
-        return [
-            200,
-            [ 'Content-type' => 'text/plain' ],
-            [ $json ],
-        ];
-    } elsif( $path eq '/status' ){
-        my %status = %{ $report };
-        my $json   = encode_json \%status;
-        return [
-            200,
-            [ 'Content-type' => 'text/plain' ],
-            [ $json ],
-        ];
-    } elsif( $path eq '/queue' ){
-        my $json = encode_json \%queue;
-        return [
-            200,
-            [ 'Content-type' => 'text/plain' ],
-            [ $json ],
-        ];
-    } else {
-        return [
-            403,
-            [ 'Content-Type' => 'text/plain' ],
-            [ "" ],
-        ];
-    }
-});
+$http_monitor->run;
 
 $cv->recv;
 $lockfile->remove;
